@@ -20,3 +20,8 @@ export {
   completeBankConnection,
   syncBankTransactions,
 } from "./bank";
+export {
+  createInvitation,
+  verifyInvitation,
+  acceptInvitation,
+} from "./invitations";
