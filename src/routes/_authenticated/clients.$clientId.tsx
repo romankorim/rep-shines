@@ -69,7 +69,7 @@ function ClientDetailPage() {
           queryClient.invalidateQueries({ queryKey: ["client", clientId] });
           window.history.replaceState({}, "", `/clients/${clientId}`);
         })
-        .catch((err) => console.error("Bank connection failed:", err));
+        .catch((err: unknown) => console.error("Bank connection failed:", err));
     }
   }, [bank_connected, connection_id]);
 
