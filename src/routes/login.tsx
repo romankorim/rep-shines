@@ -10,11 +10,17 @@ import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/login")({
+  head: () => ({
+    meta: [
+      { title: "Prihlásenie — fantozzi" },
+      { name: "description", content: "Prihláste sa do fantozzi" },
+    ],
+  }),
   component: LoginPage,
 });
 
 function LoginPage() {
-  const { signIn, isAuthenticated, isLoading } = useAuth();
+  const { signIn, isAuthenticated, isLoading, user } = useAuth();
   const navigate = useNavigate();
   const [step, setStep] = useState<"email" | "password">("email");
   const [email, setEmail] = useState("");
@@ -24,11 +30,38 @@ function LoginPage() {
   const [googleLoading, setGoogleLoading] = useState(false);
 
   useEffect(() => {
-    if (!isLoading && isAuthenticated) {
-      // Route based on role - will be handled by _authenticated
-      navigate({ to: "/dashboard" });
+    if (!isLoading && isAuthenticated && user) {
+      // Check role and redirect
+      redirectByRole(user.id);
     }
-  }, [isLoading, isAuthenticated, navigate]);
+  }, [isLoading, isAuthenticated, user]);
+
+  async function redirectByRole(userId: string) {
+    // Check if user has an accountant office
+    const { data: offices } = await supabase
+      .from("accountant_offices")
+      .select("id")
+      .eq("user_id", userId)
+      .limit(1);
+
+    if (offices && offices.length > 0) {
+      navigate({ to: "/dashboard" });
+    } else {
+      // Check if user is a client
+      const { data: clientRecord } = await supabase
+        .from("clients")
+        .select("id")
+        .eq("user_id", userId)
+        .limit(1);
+
+      if (clientRecord && clientRecord.length > 0) {
+        navigate({ to: "/portal" });
+      } else {
+        // Default to dashboard (new accountant without office yet)
+        navigate({ to: "/dashboard" });
+      }
+    }
+  }
 
   async function handleGoogleSignIn() {
     setError("");
@@ -63,14 +96,12 @@ function LoginPage() {
     setError("");
     setLoading(true);
 
-    const { error } = await signIn(email, password);
-    if (error) {
-      setError(error);
-    } else {
-      navigate({ to: "/dashboard" });
+    const { error: signInError } = await signIn(email, password);
+    if (signInError) {
+      setError(signInError);
+      setLoading(false);
     }
-
-    setLoading(false);
+    // redirect handled by useEffect
   }
 
   if (isLoading || isAuthenticated) {
