@@ -1,0 +1,118 @@
+import { createServerFn } from "@tanstack/react-start";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { z } from "zod";
+
+export const getClients = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { supabase, userId } = context;
+
+    const { data: offices } = await supabase
+      .from("accountant_offices")
+      .select("id")
+      .eq("user_id", userId)
+      .limit(1);
+
+    const officeId = offices?.[0]?.id;
+    if (!officeId) return [];
+
+    const { data, error } = await supabase
+      .from("clients")
+      .select("*")
+      .eq("office_id", officeId)
+      .order("created_at", { ascending: false });
+
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  });
+
+export const getClient = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({ clientId: z.string().uuid() }))
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+
+    const [clientRes, docsRes, txRes, emailRes, bankRes, documentsRes] = await Promise.all([
+      supabase.from("clients").select("*").eq("id", data.clientId).single(),
+      supabase.from("documents").select("*", { count: "exact", head: true }).eq("client_id", data.clientId),
+      supabase.from("bank_transactions").select("*", { count: "exact", head: true }).eq("client_id", data.clientId),
+      supabase.from("email_integrations").select("*").eq("client_id", data.clientId).limit(1),
+      supabase.from("bank_integrations").select("*").eq("client_id", data.clientId).limit(1),
+      supabase.from("documents").select("*").eq("client_id", data.clientId).order("created_at", { ascending: false }).limit(20),
+    ]);
+
+    if (clientRes.error) throw new Error(clientRes.error.message);
+
+    return {
+      client: clientRes.data,
+      docCount: docsRes.count ?? 0,
+      txCount: txRes.count ?? 0,
+      emailIntegration: emailRes.data?.[0] ?? null,
+      bankIntegration: bankRes.data?.[0] ?? null,
+      documents: documentsRes.data ?? [],
+    };
+  });
+
+export const createClient = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(
+    z.object({
+      name: z.string().min(1).max(200),
+      email: z.string().email(),
+      companyName: z.string().max(300).optional(),
+      ico: z.string().max(20).optional(),
+      dic: z.string().max(20).optional(),
+      icDph: z.string().max(20).optional(),
+      notes: z.string().max(5000).optional(),
+      sendInvite: z.boolean().default(false),
+    })
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+
+    let { data: offices } = await supabase
+      .from("accountant_offices")
+      .select("id")
+      .eq("user_id", userId)
+      .limit(1);
+
+    let officeId: string;
+    if (offices && offices.length > 0) {
+      officeId = offices[0].id;
+    } else {
+      const { data: newOffice, error: officeError } = await supabase
+        .from("accountant_offices")
+        .insert({ user_id: userId, name: "Moja kancelária" })
+        .select("id")
+        .single();
+      if (officeError) throw new Error(officeError.message);
+      officeId = newOffice.id;
+    }
+
+    const { data: newClient, error } = await supabase
+      .from("clients")
+      .insert({
+        office_id: officeId,
+        name: data.name,
+        email: data.email,
+        company_name: data.companyName || null,
+        ico: data.ico || null,
+        dic: data.dic || null,
+        ic_dph: data.icDph || null,
+        notes: data.notes || null,
+        status: "invited",
+      })
+      .select()
+      .single();
+
+    if (error) throw new Error(error.message);
+
+    if (data.sendInvite && newClient) {
+      await supabase.from("client_invitations").insert({
+        client_id: newClient.id,
+        office_id: officeId,
+      });
+    }
+
+    return newClient;
+  });

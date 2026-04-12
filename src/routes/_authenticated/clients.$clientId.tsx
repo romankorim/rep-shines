@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { FileText, Mail, Building2, ArrowLeft } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { clientQueryOptions } from "@/lib/query-options";
+import { useState } from "react";
+import { DocumentViewer } from "@/components/documents/DocumentViewer";
 
 export const Route = createFileRoute("/_authenticated/clients/$clientId")({
   component: ClientDetailPage,
@@ -22,6 +24,7 @@ const statusConfig: Record<string, { label: string; class: string }> = {
 function ClientDetailPage() {
   const { clientId } = Route.useParams();
   const { data, isLoading } = useQuery(clientQueryOptions(clientId));
+  const [selectedDoc, setSelectedDoc] = useState<any>(null);
 
   if (isLoading || !data) {
     return <DashboardLayout><div className="text-sm text-muted-foreground">Načítavam...</div></DashboardLayout>;
@@ -128,7 +131,11 @@ function ClientDetailPage() {
               {documents.map((doc) => {
                 const status = statusConfig[doc.status] || { label: doc.status, class: "bg-muted text-muted-foreground" };
                 return (
-                  <Card key={doc.id} className="cursor-pointer hover:shadow-md transition-all">
+                  <Card
+                    key={doc.id}
+                    className="cursor-pointer hover:shadow-md transition-all"
+                    onClick={() => setSelectedDoc(doc)}
+                  >
                     <CardContent className="p-3">
                       <div className="flex items-start justify-between mb-2">
                         <span className={`inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium rounded-none ${status.class}`}>
@@ -147,6 +154,12 @@ function ClientDetailPage() {
           )}
         </div>
       </div>
+
+      <DocumentViewer
+        document={selectedDoc}
+        open={!!selectedDoc}
+        onOpenChange={(open) => { if (!open) setSelectedDoc(null); }}
+      />
     </DashboardLayout>
   );
 }

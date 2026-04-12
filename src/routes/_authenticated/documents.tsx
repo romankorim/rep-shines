@@ -6,6 +6,7 @@ import { FileText, Mail, Upload, Building2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { documentsQueryOptions } from "@/lib/query-options";
 import { useState } from "react";
+import { DocumentViewer } from "@/components/documents/DocumentViewer";
 
 export const Route = createFileRoute("/_authenticated/documents")({
   component: DocumentsPage,
@@ -29,6 +30,7 @@ const sourceIcons: Record<string, typeof Mail> = {
 function DocumentsPage() {
   const [tab, setTab] = useState("pending");
   const { data: documents = [] } = useQuery(documentsQueryOptions());
+  const [selectedDoc, setSelectedDoc] = useState<any>(null);
 
   const pending = documents.filter((d: any) => d.status === "pending_approval");
   const approved = documents.filter((d: any) => d.status === "approved");
@@ -67,10 +69,22 @@ function DocumentsPage() {
                   const isOverdue = doc.due_date && new Date(doc.due_date) < new Date() && doc.status !== "approved";
 
                   return (
-                    <Card key={doc.id} className="cursor-pointer hover:shadow-md transition-all relative">
+                    <Card
+                      key={doc.id}
+                      className="cursor-pointer hover:shadow-md transition-all relative"
+                      onClick={() => setSelectedDoc(doc)}
+                    >
                       <CardContent className="p-3">
                         <div className="relative bg-muted/30 rounded-none h-32 flex items-center justify-center mb-3">
-                          <FileText className="h-8 w-8 text-muted-foreground/50" />
+                          {doc.thumbnail_url || (doc.file_type?.startsWith("image/") && doc.file_url) ? (
+                            <img
+                              src={doc.thumbnail_url || doc.file_url}
+                              alt={doc.file_name || ""}
+                              className="max-w-full max-h-full object-contain"
+                            />
+                          ) : (
+                            <FileText className="h-8 w-8 text-muted-foreground/50" />
+                          )}
                           <span className={`absolute top-2 left-2 inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium rounded-none ${status.class}`}>
                             {status.label}
                           </span>
@@ -114,6 +128,12 @@ function DocumentsPage() {
           </TabsContent>
         </Tabs>
       </div>
+
+      <DocumentViewer
+        document={selectedDoc}
+        open={!!selectedDoc}
+        onOpenChange={(open) => { if (!open) setSelectedDoc(null); }}
+      />
     </DashboardLayout>
   );
 }
