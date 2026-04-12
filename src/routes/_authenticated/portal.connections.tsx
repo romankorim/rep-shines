@@ -32,7 +32,7 @@ function ConnectionsPage() {
     try {
       const result = await getNylasConnectUrl({ data: { clientId } });
       if (result?.url) {
-        window.location.href = result.url;
+        window.open(result.url, '_blank', 'noopener');
       } else {
         toast.error("Nepodarilo sa získať odkaz na pripojenie emailu");
       }
@@ -53,7 +53,7 @@ function ConnectionsPage() {
     try {
       const result = await initBankConnection({ data: { clientId } });
       if (result?.connectUrl) {
-        window.location.href = result.connectUrl;
+        window.open(result.connectUrl, '_blank', 'noopener');
       } else {
         toast.error("Nepodarilo sa získať odkaz na pripojenie banky");
       }
