@@ -13,6 +13,7 @@ import { Route as RegisterRouteImport } from './routes/register'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as HooksScanAllEmailsRouteImport } from './routes/hooks/scan-all-emails'
 import { Route as AuthenticatedVatRouteImport } from './routes/_authenticated/vat'
 import { Route as AuthenticatedPortalRouteImport } from './routes/_authenticated/portal'
 import { Route as AuthenticatedDocumentsRouteImport } from './routes/_authenticated/documents'
@@ -44,6 +45,11 @@ const AuthenticatedRoute = AuthenticatedRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HooksScanAllEmailsRoute = HooksScanAllEmailsRouteImport.update({
+  id: '/hooks/scan-all-emails',
+  path: '/hooks/scan-all-emails',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedVatRoute = AuthenticatedVatRouteImport.update({
@@ -127,6 +133,7 @@ export interface FileRoutesByFullPath {
   '/documents': typeof AuthenticatedDocumentsRoute
   '/portal': typeof AuthenticatedPortalRouteWithChildren
   '/vat': typeof AuthenticatedVatRoute
+  '/hooks/scan-all-emails': typeof HooksScanAllEmailsRoute
   '/clients/$clientId': typeof AuthenticatedClientsClientIdRoute
   '/clients/new': typeof AuthenticatedClientsNewRoute
   '/portal/connections': typeof AuthenticatedPortalConnectionsRoute
@@ -143,6 +150,7 @@ export interface FileRoutesByTo {
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/documents': typeof AuthenticatedDocumentsRoute
   '/vat': typeof AuthenticatedVatRoute
+  '/hooks/scan-all-emails': typeof HooksScanAllEmailsRoute
   '/clients/$clientId': typeof AuthenticatedClientsClientIdRoute
   '/clients/new': typeof AuthenticatedClientsNewRoute
   '/portal/connections': typeof AuthenticatedPortalConnectionsRoute
@@ -163,6 +171,7 @@ export interface FileRoutesById {
   '/_authenticated/documents': typeof AuthenticatedDocumentsRoute
   '/_authenticated/portal': typeof AuthenticatedPortalRouteWithChildren
   '/_authenticated/vat': typeof AuthenticatedVatRoute
+  '/hooks/scan-all-emails': typeof HooksScanAllEmailsRoute
   '/_authenticated/clients/$clientId': typeof AuthenticatedClientsClientIdRoute
   '/_authenticated/clients/new': typeof AuthenticatedClientsNewRoute
   '/_authenticated/portal/connections': typeof AuthenticatedPortalConnectionsRoute
@@ -183,6 +192,7 @@ export interface FileRouteTypes {
     | '/documents'
     | '/portal'
     | '/vat'
+    | '/hooks/scan-all-emails'
     | '/clients/$clientId'
     | '/clients/new'
     | '/portal/connections'
@@ -199,6 +209,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/documents'
     | '/vat'
+    | '/hooks/scan-all-emails'
     | '/clients/$clientId'
     | '/clients/new'
     | '/portal/connections'
@@ -218,6 +229,7 @@ export interface FileRouteTypes {
     | '/_authenticated/documents'
     | '/_authenticated/portal'
     | '/_authenticated/vat'
+    | '/hooks/scan-all-emails'
     | '/_authenticated/clients/$clientId'
     | '/_authenticated/clients/new'
     | '/_authenticated/portal/connections'
@@ -233,6 +245,7 @@ export interface RootRouteChildren {
   AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
   LoginRoute: typeof LoginRoute
   RegisterRoute: typeof RegisterRoute
+  HooksScanAllEmailsRoute: typeof HooksScanAllEmailsRoute
   ApiNylasCallbackRoute: typeof ApiNylasCallbackRoute
 }
 
@@ -264,6 +277,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/hooks/scan-all-emails': {
+      id: '/hooks/scan-all-emails'
+      path: '/hooks/scan-all-emails'
+      fullPath: '/hooks/scan-all-emails'
+      preLoaderRoute: typeof HooksScanAllEmailsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/vat': {
@@ -417,6 +437,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRoute: AuthenticatedRouteWithChildren,
   LoginRoute: LoginRoute,
   RegisterRoute: RegisterRoute,
+  HooksScanAllEmailsRoute: HooksScanAllEmailsRoute,
   ApiNylasCallbackRoute: ApiNylasCallbackRoute,
 }
 export const routeTree = rootRouteImport

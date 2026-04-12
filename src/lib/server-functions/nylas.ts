@@ -19,7 +19,6 @@ export const getNylasConnectUrl = createServerFn({ method: "POST" })
     authUrl.searchParams.set("response_type", "code");
     authUrl.searchParams.set("access_type", "offline");
     authUrl.searchParams.set("state", data.clientId);
-    // Request email read scope
     authUrl.searchParams.set("scope", "https://www.googleapis.com/auth/gmail.readonly,https://graph.microsoft.com/Mail.Read");
 
     return { url: authUrl.toString() };
@@ -40,7 +39,6 @@ export const exchangeNylasCode = createServerFn({ method: "POST" })
 
     const appUrl = process.env.APP_URL || "https://localhost:3000";
 
-    // Exchange code for grant
     const tokenResp = await fetch("https://api.us.nylas.com/v3/connect/token", {
       method: "POST",
       headers: {
@@ -67,7 +65,6 @@ export const exchangeNylasCode = createServerFn({ method: "POST" })
 
     if (!grantId) throw new Error("No grant_id returned from Nylas");
 
-    // Get office_id from client
     const { data: client } = await supabase
       .from("clients")
       .select("office_id")
@@ -76,7 +73,6 @@ export const exchangeNylasCode = createServerFn({ method: "POST" })
 
     if (!client) throw new Error("Client not found");
 
-    // Upsert email integration
     const { error: upsertError } = await supabase
       .from("email_integrations")
       .upsert(
@@ -93,7 +89,6 @@ export const exchangeNylasCode = createServerFn({ method: "POST" })
       );
 
     if (upsertError) {
-      // If upsert fails (no unique constraint), try insert
       await supabase.from("email_integrations").insert({
         client_id: data.clientId,
         office_id: client.office_id,
@@ -104,7 +99,7 @@ export const exchangeNylasCode = createServerFn({ method: "POST" })
       });
     }
 
-    // Trigger initial email scan
+    // Trigger initial scan
     const supabaseUrl = process.env.SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL;
     const anonKey = process.env.SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
     if (supabaseUrl && anonKey) {
@@ -119,6 +114,52 @@ export const exchangeNylasCode = createServerFn({ method: "POST" })
     }
 
     return { success: true, email };
+  });
+
+// Trigger manual email scan for a specific client
+export const triggerEmailScan = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({ clientId: z.string().uuid() }))
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+
+    const { data: integration } = await supabase
+      .from("email_integrations")
+      .select("nylas_grant_id, office_id")
+      .eq("client_id", data.clientId)
+      .eq("status", "connected")
+      .single();
+
+    if (!integration?.nylas_grant_id) {
+      throw new Error("No connected email integration for this client");
+    }
+
+    const supabaseUrl = process.env.SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL;
+    const anonKey = process.env.SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+    if (!supabaseUrl || !anonKey) throw new Error("Supabase not configured");
+
+    const resp = await fetch(`${supabaseUrl}/functions/v1/scan-emails`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${anonKey}`,
+      },
+      body: JSON.stringify({
+        grantId: integration.nylas_grant_id,
+        clientId: data.clientId,
+        officeId: integration.office_id,
+      }),
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      console.error("Scan failed:", errText);
+      throw new Error("Email scan failed");
+    }
+
+    const result = await resp.json();
+    return { success: true, processed: result.processed || 0 };
   });
 
 // Disconnect email integration
