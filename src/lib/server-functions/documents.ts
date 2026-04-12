@@ -56,6 +56,67 @@ export const updateDocumentStatus = createServerFn({ method: "POST" })
     return updated;
   });
 
+export const updateDocumentFields = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(
+    z.object({
+      documentId: z.string().uuid(),
+      supplierName: z.string().max(500).optional(),
+      supplierIco: z.string().max(50).optional(),
+      supplierDic: z.string().max(50).optional(),
+      supplierIcDph: z.string().max(50).optional(),
+      documentNumber: z.string().max(100).optional(),
+      variableSymbol: z.string().max(50).optional(),
+      issueDate: z.string().max(10).optional(),
+      dueDate: z.string().max(10).optional(),
+      deliveryDate: z.string().max(10).optional(),
+      totalAmount: z.number().optional(),
+      currency: z.string().max(10).optional(),
+      taxBase: z.number().optional(),
+      vatAmount: z.number().optional(),
+      vatRate: z.number().optional(),
+    })
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+
+    const fieldMap: Record<string, string> = {
+      supplierName: "supplier_name",
+      supplierIco: "supplier_ico",
+      supplierDic: "supplier_dic",
+      supplierIcDph: "supplier_ic_dph",
+      documentNumber: "document_number",
+      variableSymbol: "variable_symbol",
+      issueDate: "issue_date",
+      dueDate: "due_date",
+      deliveryDate: "delivery_date",
+      totalAmount: "total_amount",
+      currency: "currency",
+      taxBase: "tax_base",
+      vatAmount: "vat_amount",
+      vatRate: "vat_rate",
+    };
+
+    const updateData: Record<string, unknown> = {};
+    for (const [key, dbCol] of Object.entries(fieldMap)) {
+      if ((data as any)[key] !== undefined) {
+        updateData[dbCol] = (data as any)[key];
+      }
+    }
+
+    if (Object.keys(updateData).length === 0) return null;
+
+    const { data: updated, error } = await supabase
+      .from("documents")
+      .update(updateData)
+      .eq("id", data.documentId)
+      .select()
+      .single();
+
+    if (error) throw new Error(error.message);
+    return updated;
+  });
+
 export const createDocumentRecord = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(

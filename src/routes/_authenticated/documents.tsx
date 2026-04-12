@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { documentsQueryOptions } from "@/lib/query-options";
 import { useState } from "react";
 import { DocumentViewer } from "@/components/documents/DocumentViewer";
+import { AccountantUploadDialog } from "@/components/documents/AccountantUploadDialog";
 
 export const Route = createFileRoute("/_authenticated/documents")({
   component: DocumentsPage,
@@ -41,9 +42,12 @@ function DocumentsPage() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-lg sm:text-xl font-semibold tracking-tight">Doklady</h1>
-          <p className="text-xs sm:text-sm text-muted-foreground mt-1">Kontrola dokladov od všetkých klientov</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-lg sm:text-xl font-semibold tracking-tight">Doklady</h1>
+            <p className="text-xs sm:text-sm text-muted-foreground mt-1">Kontrola dokladov od všetkých klientov</p>
+          </div>
+          <AccountantUploadDialog />
         </div>
 
         <Tabs value={tab} onValueChange={setTab}>

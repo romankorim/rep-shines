@@ -1,8 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import {
@@ -12,8 +11,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Download, X, Mail, Upload, Building2, FileText, CheckCircle, XCircle, RotateCcw } from "lucide-react";
-import { updateDocumentStatus } from "@/lib/server-functions";
+import { Download, X, Mail, Upload, Building2, FileText, CheckCircle, XCircle, RotateCcw, Pencil, Save } from "lucide-react";
+import { updateDocumentStatus, updateDocumentFields } from "@/lib/server-functions";
 import { useQueryClient } from "@tanstack/react-query";
 
 interface DocumentViewerProps {
@@ -41,12 +40,66 @@ const expenseCategories = [
   "materiál", "služby", "cestovné", "telefón", "internet", "nájom", "poistenie", "ostatné",
 ];
 
+function EditableField({ label, value, editing, onChange, type = "text" }: {
+  label: string; value: string; editing: boolean; onChange: (v: string) => void; type?: string;
+}) {
+  return (
+    <div>
+      <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">{label}</Label>
+      {editing ? (
+        <Input value={value} onChange={(e) => onChange(e.target.value)} className="mt-0.5 h-7 text-xs" type={type} />
+      ) : (
+        <p className="text-xs mt-0.5">{value || "—"}</p>
+      )}
+    </div>
+  );
+}
+
 export function DocumentViewer({ document: doc, open, onOpenChange }: DocumentViewerProps) {
   const queryClient = useQueryClient();
-  const [accountantNotes, setAccountantNotes] = useState(doc?.accountant_notes || "");
-  const [expenseCategory, setExpenseCategory] = useState(doc?.expense_category || "");
-  const [accountingCode, setAccountingCode] = useState(doc?.accounting_code || "");
+  const [accountantNotes, setAccountantNotes] = useState("");
+  const [expenseCategory, setExpenseCategory] = useState("");
+  const [accountingCode, setAccountingCode] = useState("");
   const [loading, setLoading] = useState(false);
+  const [editing, setEditing] = useState(false);
+
+  // Editable fields
+  const [supplierName, setSupplierName] = useState("");
+  const [supplierIco, setSupplierIco] = useState("");
+  const [supplierDic, setSupplierDic] = useState("");
+  const [supplierIcDph, setSupplierIcDph] = useState("");
+  const [documentNumber, setDocumentNumber] = useState("");
+  const [variableSymbol, setVariableSymbol] = useState("");
+  const [issueDate, setIssueDate] = useState("");
+  const [dueDate, setDueDate] = useState("");
+  const [deliveryDate, setDeliveryDate] = useState("");
+  const [totalAmount, setTotalAmount] = useState("");
+  const [taxBase, setTaxBase] = useState("");
+  const [vatAmount, setVatAmount] = useState("");
+  const [vatRate, setVatRate] = useState("");
+
+  // Sync state when doc changes
+  useEffect(() => {
+    if (doc) {
+      setAccountantNotes(doc.accountant_notes || "");
+      setExpenseCategory(doc.expense_category || "");
+      setAccountingCode(doc.accounting_code || "");
+      setSupplierName(doc.supplier_name || "");
+      setSupplierIco(doc.supplier_ico || "");
+      setSupplierDic(doc.supplier_dic || "");
+      setSupplierIcDph(doc.supplier_ic_dph || "");
+      setDocumentNumber(doc.document_number || "");
+      setVariableSymbol(doc.variable_symbol || "");
+      setIssueDate(doc.issue_date || "");
+      setDueDate(doc.due_date || "");
+      setDeliveryDate(doc.delivery_date || "");
+      setTotalAmount(doc.total_amount?.toString() || "");
+      setTaxBase(doc.tax_base?.toString() || "");
+      setVatAmount(doc.vat_amount?.toString() || "");
+      setVatRate(doc.vat_rate?.toString() || "");
+      setEditing(false);
+    }
+  }, [doc]);
 
   if (!doc) return null;
 
@@ -57,6 +110,37 @@ export function DocumentViewer({ document: doc, open, onOpenChange }: DocumentVi
   const overduedays = doc.due_date && new Date(doc.due_date) < new Date() && doc.status !== "approved"
     ? Math.ceil((new Date().getTime() - new Date(doc.due_date).getTime()) / (1000 * 60 * 60 * 24))
     : 0;
+
+  const confidenceColor = doc.ai_confidence >= 90 ? "text-success" : doc.ai_confidence >= 70 ? "text-warning-foreground" : "text-destructive";
+
+  async function handleSaveFields() {
+    setLoading(true);
+    try {
+      await updateDocumentFields({
+        data: {
+          documentId: doc.id,
+          supplierName: supplierName || undefined,
+          supplierIco: supplierIco || undefined,
+          supplierDic: supplierDic || undefined,
+          supplierIcDph: supplierIcDph || undefined,
+          documentNumber: documentNumber || undefined,
+          variableSymbol: variableSymbol || undefined,
+          issueDate: issueDate || undefined,
+          dueDate: dueDate || undefined,
+          deliveryDate: deliveryDate || undefined,
+          totalAmount: totalAmount ? parseFloat(totalAmount) : undefined,
+          taxBase: taxBase ? parseFloat(taxBase) : undefined,
+          vatAmount: vatAmount ? parseFloat(vatAmount) : undefined,
+          vatRate: vatRate ? parseFloat(vatRate) : undefined,
+        },
+      });
+      await queryClient.invalidateQueries({ queryKey: ["documents"] });
+      await queryClient.invalidateQueries({ queryKey: ["client"] });
+      setEditing(false);
+    } catch {} finally {
+      setLoading(false);
+    }
+  }
 
   async function handleStatusChange(newStatus: "approved" | "rejected" | "pending_approval") {
     setLoading(true);
@@ -74,13 +158,10 @@ export function DocumentViewer({ document: doc, open, onOpenChange }: DocumentVi
       await queryClient.invalidateQueries({ queryKey: ["client"] });
       await queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
       onOpenChange(false);
-    } catch {
-    } finally {
+    } catch {} finally {
       setLoading(false);
     }
   }
-
-  const confidenceColor = doc.ai_confidence >= 90 ? "text-success" : doc.ai_confidence >= 70 ? "text-warning-foreground" : "text-destructive";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -129,61 +210,54 @@ export function DocumentViewer({ document: doc, open, onOpenChange }: DocumentVi
           {/* Right panel - Metadata */}
           <div className="flex-[2] flex flex-col min-w-0">
             <Tabs defaultValue="details" className="flex-1 flex flex-col">
-              <TabsList className="w-full justify-start rounded-none border-b border-border bg-transparent px-2">
-                <TabsTrigger value="details" className="text-xs">Detaily</TabsTrigger>
-                <TabsTrigger value="vat" className="text-xs">DPH</TabsTrigger>
-                <TabsTrigger value="accounting" className="text-xs">Účtovanie</TabsTrigger>
-                <TabsTrigger value="source" className="text-xs">Zdroj</TabsTrigger>
-              </TabsList>
+              <div className="flex items-center justify-between border-b border-border px-2">
+                <TabsList className="justify-start rounded-none bg-transparent">
+                  <TabsTrigger value="details" className="text-xs">Detaily</TabsTrigger>
+                  <TabsTrigger value="vat" className="text-xs">DPH</TabsTrigger>
+                  <TabsTrigger value="accounting" className="text-xs">Účtovanie</TabsTrigger>
+                  <TabsTrigger value="source" className="text-xs">Zdroj</TabsTrigger>
+                </TabsList>
+                {!editing ? (
+                  <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => setEditing(true)}>
+                    <Pencil className="h-3 w-3" /> Upraviť
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="ghost" className="h-7 text-xs gap-1 text-primary" onClick={handleSaveFields} disabled={loading}>
+                    <Save className="h-3 w-3" /> Uložiť
+                  </Button>
+                )}
+              </div>
 
               <div className="flex-1 overflow-y-auto">
                 <TabsContent value="details" className="p-4 space-y-4 mt-0">
-                  <div>
-                    <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Dodávateľ</Label>
-                    <p className="text-sm font-medium mt-0.5">{doc.supplier_name || "—"}</p>
-                  </div>
+                  <EditableField label="Dodávateľ" value={supplierName} editing={editing} onChange={setSupplierName} />
                   <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">IČO</Label>
-                      <p className="text-xs mt-0.5">{doc.supplier_ico || "—"}</p>
-                    </div>
-                    <div>
-                      <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">DIČ</Label>
-                      <p className="text-xs mt-0.5">{doc.supplier_dic || "—"}</p>
-                    </div>
-                    <div>
-                      <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">IČ DPH</Label>
-                      <p className="text-xs mt-0.5">{doc.supplier_ic_dph || "—"}</p>
-                    </div>
+                    <EditableField label="IČO" value={supplierIco} editing={editing} onChange={setSupplierIco} />
+                    <EditableField label="DIČ" value={supplierDic} editing={editing} onChange={setSupplierDic} />
+                    <EditableField label="IČ DPH" value={supplierIcDph} editing={editing} onChange={setSupplierIcDph} />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Číslo dokladu</Label>
-                      <p className="text-xs mt-0.5">{doc.document_number || "—"}</p>
-                    </div>
-                    <div>
-                      <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Variabilný symbol</Label>
-                      <p className="text-xs mt-0.5">{doc.variable_symbol || "—"}</p>
-                    </div>
+                    <EditableField label="Číslo dokladu" value={documentNumber} editing={editing} onChange={setDocumentNumber} />
+                    <EditableField label="Variabilný symbol" value={variableSymbol} editing={editing} onChange={setVariableSymbol} />
                   </div>
                   <div className="grid grid-cols-3 gap-3">
+                    <EditableField label="Vystavenie" value={issueDate} editing={editing} onChange={setIssueDate} type="date" />
                     <div>
-                      <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Vystavenie</Label>
-                      <p className="text-xs mt-0.5">{doc.issue_date ? new Date(doc.issue_date).toLocaleDateString("sk-SK") : "—"}</p>
+                      {editing ? (
+                        <EditableField label="Splatnosť" value={dueDate} editing onChange={setDueDate} type="date" />
+                      ) : (
+                        <div>
+                          <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Splatnosť</Label>
+                          <p className="text-xs mt-0.5">
+                            {dueDate ? new Date(dueDate).toLocaleDateString("sk-SK") : "—"}
+                            {overduedays > 0 && (
+                              <span className="block text-[9px] text-destructive font-medium">{overduedays} dní po splatnosti</span>
+                            )}
+                          </p>
+                        </div>
+                      )}
                     </div>
-                    <div>
-                      <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Splatnosť</Label>
-                      <p className="text-xs mt-0.5">
-                        {doc.due_date ? new Date(doc.due_date).toLocaleDateString("sk-SK") : "—"}
-                        {overduedays > 0 && (
-                          <span className="block text-[9px] text-destructive font-medium">{overduedays} dní po splatnosti</span>
-                        )}
-                      </p>
-                    </div>
-                    <div>
-                      <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Dodanie</Label>
-                      <p className="text-xs mt-0.5">{doc.delivery_date ? new Date(doc.delivery_date).toLocaleDateString("sk-SK") : "—"}</p>
-                    </div>
+                    <EditableField label="Dodanie" value={deliveryDate} editing={editing} onChange={setDeliveryDate} type="date" />
                   </div>
                   <div>
                     <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Poznámka účtovníka</Label>
@@ -200,26 +274,21 @@ export function DocumentViewer({ document: doc, open, onOpenChange }: DocumentVi
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Celková suma</Label>
-                      <p className="text-lg font-bold mt-0.5">
-                        {doc.total_amount ? `${Number(doc.total_amount).toLocaleString("sk-SK")} ${doc.currency || "€"}` : "—"}
-                      </p>
+                      {editing ? (
+                        <Input value={totalAmount} onChange={(e) => setTotalAmount(e.target.value)} className="mt-0.5 h-7 text-xs" type="number" step="0.01" />
+                      ) : (
+                        <p className="text-lg font-bold mt-0.5">
+                          {totalAmount ? `${Number(totalAmount).toLocaleString("sk-SK")} ${doc.currency || "€"}` : "—"}
+                        </p>
+                      )}
                     </div>
-                    <div>
-                      <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Sadzba DPH</Label>
-                      <p className="text-sm mt-0.5">{doc.vat_rate != null ? `${doc.vat_rate} %` : "—"}</p>
-                    </div>
+                    <EditableField label="Sadzba DPH (%)" value={vatRate} editing={editing} onChange={setVatRate} type="number" />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Základ dane</Label>
-                      <p className="text-sm mt-0.5">{doc.tax_base ? `${Number(doc.tax_base).toLocaleString("sk-SK")} €` : "—"}</p>
-                    </div>
-                    <div>
-                      <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Suma DPH</Label>
-                      <p className="text-sm mt-0.5">{doc.vat_amount ? `${Number(doc.vat_amount).toLocaleString("sk-SK")} €` : "—"}</p>
-                    </div>
+                    <EditableField label="Základ dane" value={taxBase} editing={editing} onChange={setTaxBase} type="number" />
+                    <EditableField label="Suma DPH" value={vatAmount} editing={editing} onChange={setVatAmount} type="number" />
                   </div>
-                  {doc.vat_breakdown && Array.isArray(doc.vat_breakdown) && doc.vat_breakdown.length > 0 && (
+                  {!editing && doc.vat_breakdown && Array.isArray(doc.vat_breakdown) && doc.vat_breakdown.length > 0 && (
                     <div>
                       <Label className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2 block">Rozpis DPH</Label>
                       <table className="w-full text-xs">
@@ -317,16 +386,6 @@ export function DocumentViewer({ document: doc, open, onOpenChange }: DocumentVi
                       {doc.file_size ? `${(Number(doc.file_size) / 1024 / 1024).toFixed(2)} MB` : "—"}
                     </p>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Nahraté</Label>
-                      <p className="text-xs mt-0.5">{new Date(doc.created_at).toLocaleString("sk-SK")}</p>
-                    </div>
-                    <div>
-                      <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Upravené</Label>
-                      <p className="text-xs mt-0.5">{new Date(doc.updated_at).toLocaleString("sk-SK")}</p>
-                    </div>
-                  </div>
                   {doc.ai_confidence != null && (
                     <div>
                       <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Dôveryhodnosť AI</Label>
@@ -339,6 +398,12 @@ export function DocumentViewer({ document: doc, open, onOpenChange }: DocumentVi
                         </div>
                         <span className={`text-xs font-medium ${confidenceColor}`}>{doc.ai_confidence}%</span>
                       </div>
+                    </div>
+                  )}
+                  {doc.clients && (
+                    <div>
+                      <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Klient</Label>
+                      <p className="text-xs mt-0.5">{doc.clients.name} {doc.clients.company_name ? `(${doc.clients.company_name})` : ""}</p>
                     </div>
                   )}
                 </TabsContent>
