@@ -16,9 +16,10 @@ function AuthenticatedLayout() {
   const { isAuthenticated, isLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const { data: currentUser, isLoading: userLoading } = useQuery({
+  const { data: currentUser, isLoading: userLoading, isError } = useQuery({
     ...currentUserQueryOptions(),
     enabled: isAuthenticated,
+    retry: 1,
   });
 
   useEffect(() => {
@@ -46,7 +47,7 @@ function AuthenticatedLayout() {
     }
   }, [currentUser, userLoading, location.pathname, navigate]);
 
-  if (isLoading || (isAuthenticated && userLoading)) {
+  if (isLoading || (isAuthenticated && userLoading && !isError)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="space-y-3 w-48">
