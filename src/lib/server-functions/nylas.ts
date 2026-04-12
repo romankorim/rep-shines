@@ -10,7 +10,7 @@ export const getNylasConnectUrl = createServerFn({ method: "POST" })
     const clientId = process.env.NYLAS_CLIENT_ID;
     if (!clientId) throw new Error("NYLAS_CLIENT_ID not configured");
 
-    const appUrl = process.env.APP_URL || import.meta.env.VITE_SUPABASE_URL?.replace("supabase.co", "lovable.app") || "https://localhost:3000";
+    const appUrl = process.env.APP_URL || `https://id-preview--e35fe031-9c7f-4f24-ac03-1474b0aafb32.lovable.app`;
     const callbackUri = `${appUrl}/api/nylas/callback`;
 
     const authUrl = new URL("https://api.us.nylas.com/v3/connect/auth");
@@ -37,7 +37,7 @@ export const exchangeNylasCode = createServerFn({ method: "POST" })
     const nylasApiKey = process.env.NYLAS_API_KEY;
     if (!nylasClientId || !nylasApiKey) throw new Error("Nylas not configured");
 
-    const appUrl = process.env.APP_URL || "https://localhost:3000";
+    const appUrl = process.env.APP_URL || `https://id-preview--e35fe031-9c7f-4f24-ac03-1474b0aafb32.lovable.app`;
 
     const tokenResp = await fetch("https://api.us.nylas.com/v3/connect/token", {
       method: "POST",
