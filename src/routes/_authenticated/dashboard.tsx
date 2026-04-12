@@ -62,7 +62,7 @@ function DashboardPage() {
     archived: "Archivovaný",
   };
 
-  const displayClients = clients.slice(0, 10);
+  const displayClients = Array.isArray(clients) ? clients.slice(0, 10) : [];
 
   return (
     <DashboardLayout>
