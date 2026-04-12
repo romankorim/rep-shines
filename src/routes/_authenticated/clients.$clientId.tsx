@@ -13,7 +13,7 @@ export const Route = createFileRoute("/_authenticated/clients/$clientId")({
   component: ClientDetailPage,
   validateSearch: (search: Record<string, unknown>) => ({
     nylas_code: (search.nylas_code as string) || undefined,
-  }),
+  } as { nylas_code?: string }),
 });
 
 const statusConfig: Record<string, { label: string; class: string }> = {
