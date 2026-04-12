@@ -107,14 +107,50 @@ function ClientDetailPage() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div className="flex items-center gap-3">
-          <Link to="/clients" className="text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-          <div>
-            <h1 className="text-lg sm:text-xl font-semibold tracking-tight">{client.name}</h1>
-            <p className="text-xs text-muted-foreground">{client.company_name || client.email}</p>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Link to="/clients" className="text-muted-foreground hover:text-foreground">
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+            <div>
+              <h1 className="text-lg sm:text-xl font-semibold tracking-tight">{client.name}</h1>
+              <p className="text-xs text-muted-foreground">{client.company_name || client.email}</p>
+            </div>
           </div>
+          {!client.user_id && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={creatingInvite}
+              onClick={async () => {
+                setCreatingInvite(true);
+                try {
+                  const result = await createInvitation({ data: { clientId } });
+                  const inviteUrl = `${window.location.origin}/invite?token=${result.token}`;
+                  await navigator.clipboard.writeText(inviteUrl);
+                  setInviteCopied(true);
+                  setTimeout(() => setInviteCopied(false), 3000);
+                } catch (err: unknown) {
+                  console.error("Failed to create invitation:", err);
+                } finally {
+                  setCreatingInvite(false);
+                }
+              }}
+            >
+              {creatingInvite ? (
+                <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> Generujem...</>
+              ) : inviteCopied ? (
+                <><Check className="h-3.5 w-3.5 mr-1 text-primary" /> Link skopírovaný!</>
+              ) : (
+                <><LinkIcon className="h-3.5 w-3.5 mr-1" /> Pozvať klienta</>
+              )}
+            </Button>
+          )}
+          {client.user_id && (
+            <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-medium bg-success/15 text-success rounded-none">
+              Klient registrovaný
+            </span>
+          )}
         </div>
 
         {exchangingCode && (
