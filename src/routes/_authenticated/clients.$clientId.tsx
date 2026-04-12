@@ -2,19 +2,29 @@ import { createFileRoute, Link, useSearch } from "@tanstack/react-router";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { FileText, Mail, Building2, ArrowLeft, Loader2, Upload } from "lucide-react";
+import { FileText, Mail, Building2, ArrowLeft, Loader2, Upload, RefreshCw } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clientQueryOptions } from "@/lib/query-options";
 import { useState, useEffect } from "react";
 import { DocumentViewer } from "@/components/documents/DocumentViewer";
-import { getNylasConnectUrl, exchangeNylasCode, triggerEmailScan } from "@/lib/server-functions";
-import { RefreshCw } from "lucide-react";
+import {
+  getNylasConnectUrl,
+  exchangeNylasCode,
+  triggerEmailScan,
+} from "@/lib/server-functions";
+import {
+  initBankConnection,
+  completeBankConnection,
+  syncBankTransactions,
+} from "@/lib/server-functions/bank";
 
 export const Route = createFileRoute("/_authenticated/clients/$clientId")({
   component: ClientDetailPage,
   validateSearch: (search: Record<string, unknown>) => ({
     nylas_code: (search.nylas_code as string) || undefined,
-  } as { nylas_code?: string }),
+    bank_connected: (search.bank_connected as string) || undefined,
+    connection_id: (search.connection_id as string) || undefined,
+  } as { nylas_code?: string; bank_connected?: string; connection_id?: string }),
 });
 
 const statusConfig: Record<string, { label: string; class: string }> = {
@@ -28,12 +38,14 @@ const statusConfig: Record<string, { label: string; class: string }> = {
 
 function ClientDetailPage() {
   const { clientId } = Route.useParams();
-  const { nylas_code } = Route.useSearch();
+  const { nylas_code, bank_connected, connection_id } = Route.useSearch();
   const { data, isLoading } = useQuery(clientQueryOptions(clientId));
   const [selectedDoc, setSelectedDoc] = useState<any>(null);
   const [connectingEmail, setConnectingEmail] = useState(false);
   const [exchangingCode, setExchangingCode] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [connectingBank, setConnectingBank] = useState(false);
+  const [syncingBank, setSyncingBank] = useState(false);
   const queryClient = useQueryClient();
 
   // Handle Nylas OAuth callback
@@ -52,6 +64,23 @@ function ClientDetailPage() {
         .finally(() => setExchangingCode(false));
     }
   }, [nylas_code]);
+
+  // Handle Salt Edge bank callback
+  useEffect(() => {
+    if (bank_connected && connection_id) {
+      completeBankConnection({ data: { clientId, connectionId: connection_id } })
+        .then(() => {
+          queryClient.invalidateQueries({ queryKey: ["client", clientId] });
+          // Automatically sync transactions after connection
+          return syncBankTransactions({ data: { clientId } });
+        })
+        .then(() => {
+          queryClient.invalidateQueries({ queryKey: ["client", clientId] });
+          window.history.replaceState({}, "", `/clients/${clientId}`);
+        })
+        .catch((err: unknown) => console.error("Bank connection failed:", err));
+    }
+  }, [bank_connected, connection_id]);
 
   if (isLoading || !data) {
     return <DashboardLayout><div className="text-sm text-muted-foreground">Načítavam...</div></DashboardLayout>;
@@ -191,13 +220,60 @@ function ClientDetailPage() {
                   <p className="text-sm">{bankIntegration.bank_name}</p>
                   <div className="flex items-center gap-2">
                     <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-medium bg-success/15 text-success rounded-none">Aktívne</span>
-                    <Button size="sm" variant="outline">Synchronizovať</Button>
+                    {bankIntegration.last_sync_at && (
+                      <span className="text-[10px] text-muted-foreground">
+                        Posledný sync: {new Date(bankIntegration.last_sync_at).toLocaleString("sk-SK")}
+                      </span>
+                    )}
                   </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={syncingBank}
+                    onClick={async () => {
+                      setSyncingBank(true);
+                      try {
+                        await syncBankTransactions({ data: { clientId } });
+                        queryClient.invalidateQueries({ queryKey: ["client", clientId] });
+                      } catch (err: unknown) {
+                        console.error("Bank sync failed:", err);
+                      } finally {
+                        setSyncingBank(false);
+                      }
+                    }}
+                  >
+                    {syncingBank ? (
+                      <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> Synchronizujem...</>
+                    ) : (
+                      <><RefreshCw className="h-3.5 w-3.5 mr-1" /> Synchronizovať</>
+                    )}
+                  </Button>
                 </div>
               ) : (
                 <div className="space-y-3">
                   <p className="text-xs text-muted-foreground">Tatra banka, SLSP, VÚB, ČSOB, mBank a ďalšie SK/CZ banky</p>
-                  <Button size="sm">Pripojiť banku</Button>
+                  <Button
+                    size="sm"
+                    disabled={connectingBank}
+                    onClick={async () => {
+                      setConnectingBank(true);
+                      try {
+                        const result = await initBankConnection({ data: { clientId } });
+                        if (result?.connectUrl) {
+                          window.location.href = result.connectUrl;
+                        }
+                      } catch (err: unknown) {
+                        console.error("Bank connect failed:", err);
+                        setConnectingBank(false);
+                      }
+                    }}
+                  >
+                    {connectingBank ? (
+                      <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> Pripájam...</>
+                    ) : (
+                      <><Building2 className="h-3.5 w-3.5 mr-1" /> Pripojiť banku</>
+                    )}
+                  </Button>
                 </div>
               )}
             </CardContent>
