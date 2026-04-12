@@ -34,8 +34,8 @@ function LoginPage() {
     setError("");
     setGoogleLoading(true);
     try {
-      const { default: lovableModule } = await import("@/integrations/lovable/index");
-      const result = await lovableModule.auth.signInWithOAuth("google", {
+      const { lovable } = await import("@/integrations/lovable/index");
+      const result = await lovable.auth.signInWithOAuth("google", {
         redirect_uri: typeof window !== "undefined" ? window.location.origin : "",
       });
       if (result.error) {
