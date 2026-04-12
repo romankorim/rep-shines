@@ -211,13 +211,60 @@ function ClientDetailPage() {
                   <p className="text-sm">{bankIntegration.bank_name}</p>
                   <div className="flex items-center gap-2">
                     <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-medium bg-success/15 text-success rounded-none">Aktívne</span>
-                    <Button size="sm" variant="outline">Synchronizovať</Button>
+                    {bankIntegration.last_sync_at && (
+                      <span className="text-[10px] text-muted-foreground">
+                        Posledný sync: {new Date(bankIntegration.last_sync_at).toLocaleString("sk-SK")}
+                      </span>
+                    )}
                   </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={syncingBank}
+                    onClick={async () => {
+                      setSyncingBank(true);
+                      try {
+                        await syncBankTransactions({ data: { clientId } });
+                        queryClient.invalidateQueries({ queryKey: ["client", clientId] });
+                      } catch (err: unknown) {
+                        console.error("Bank sync failed:", err);
+                      } finally {
+                        setSyncingBank(false);
+                      }
+                    }}
+                  >
+                    {syncingBank ? (
+                      <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> Synchronizujem...</>
+                    ) : (
+                      <><RefreshCw className="h-3.5 w-3.5 mr-1" /> Synchronizovať</>
+                    )}
+                  </Button>
                 </div>
               ) : (
                 <div className="space-y-3">
                   <p className="text-xs text-muted-foreground">Tatra banka, SLSP, VÚB, ČSOB, mBank a ďalšie SK/CZ banky</p>
-                  <Button size="sm">Pripojiť banku</Button>
+                  <Button
+                    size="sm"
+                    disabled={connectingBank}
+                    onClick={async () => {
+                      setConnectingBank(true);
+                      try {
+                        const result = await initBankConnection({ data: { clientId } });
+                        if (result?.connectUrl) {
+                          window.location.href = result.connectUrl;
+                        }
+                      } catch (err: unknown) {
+                        console.error("Bank connect failed:", err);
+                        setConnectingBank(false);
+                      }
+                    }}
+                  >
+                    {connectingBank ? (
+                      <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> Pripájam...</>
+                    ) : (
+                      <><Building2 className="h-3.5 w-3.5 mr-1" /> Pripojiť banku</>
+                    )}
+                  </Button>
                 </div>
               )}
             </CardContent>
