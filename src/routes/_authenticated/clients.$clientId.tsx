@@ -7,7 +7,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clientQueryOptions } from "@/lib/query-options";
 import { useState, useEffect } from "react";
 import { DocumentViewer } from "@/components/documents/DocumentViewer";
-import { getNylasConnectUrl, exchangeNylasCode, triggerEmailScan, initBankConnection, completeBankConnection, syncBankTransactions } from "@/lib/server-functions";
+import {
+  getNylasConnectUrl,
+  exchangeNylasCode,
+  triggerEmailScan,
+  initBankConnection,
+  completeBankConnection,
+  syncBankTransactions,
+} from "@/lib/server-functions";
 
 export const Route = createFileRoute("/_authenticated/clients/$clientId")({
   component: ClientDetailPage,
