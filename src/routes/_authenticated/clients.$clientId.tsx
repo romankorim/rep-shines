@@ -47,6 +47,8 @@ function ClientDetailPage() {
   const [scanning, setScanning] = useState(false);
   const [connectingBank, setConnectingBank] = useState(false);
   const [syncingBank, setSyncingBank] = useState(false);
+  const [inviteCopied, setInviteCopied] = useState(false);
+  const [creatingInvite, setCreatingInvite] = useState(false);
   const queryClient = useQueryClient();
 
   // Handle Nylas OAuth callback
