@@ -96,7 +96,7 @@ function ClientDetailPage() {
     try {
       const result = await getNylasConnectUrl({ data: { clientId } });
       if (result?.url) {
-        window.location.href = result.url;
+        window.open(result.url, '_blank', 'noopener');
       }
     } catch (err) {
       console.error("Failed to get Nylas URL:", err);
@@ -299,7 +299,7 @@ function ClientDetailPage() {
                       try {
                         const result = await initBankConnection({ data: { clientId } });
                         if (result?.connectUrl) {
-                          window.location.href = result.connectUrl;
+                          window.open(result.connectUrl, '_blank', 'noopener');
                         }
                       } catch (err: unknown) {
                         console.error("Bank connect failed:", err);
