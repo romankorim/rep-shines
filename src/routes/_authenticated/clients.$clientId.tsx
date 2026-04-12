@@ -2,7 +2,7 @@ import { createFileRoute, Link, useSearch } from "@tanstack/react-router";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { FileText, Mail, Building2, ArrowLeft, Loader2, Upload, RefreshCw } from "lucide-react";
+import { FileText, Mail, Building2, ArrowLeft, Loader2, Upload, RefreshCw, Copy, Check, LinkIcon } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clientQueryOptions } from "@/lib/query-options";
 import { useState, useEffect } from "react";
@@ -17,6 +17,7 @@ import {
   completeBankConnection,
   syncBankTransactions,
 } from "@/lib/server-functions/bank";
+import { createInvitation } from "@/lib/server-functions/invitations";
 
 export const Route = createFileRoute("/_authenticated/clients/$clientId")({
   component: ClientDetailPage,
