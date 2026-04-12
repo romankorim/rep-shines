@@ -37,6 +37,16 @@ function LoginPage() {
   }, [isLoading, isAuthenticated, user]);
 
   async function redirectByRole(userId: string) {
+    // Check for pending invitation token
+    if (typeof window !== "undefined") {
+      const inviteToken = localStorage.getItem("fantozzi_invite_token");
+      if (inviteToken) {
+        localStorage.removeItem("fantozzi_invite_token");
+        navigate({ to: "/invite", search: { token: inviteToken } });
+        return;
+      }
+    }
+
     // Check if user has an accountant office
     const { data: offices } = await supabase
       .from("accountant_offices")
