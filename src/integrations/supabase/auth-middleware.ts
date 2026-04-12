@@ -4,19 +4,21 @@ import { getRequest } from '@tanstack/react-start/server'
 import { createClient } from '@supabase/supabase-js'
 import type { Database } from './types'
 
-function getCookieValue(cookieHeader: string | null, name: string) {
-  if (!cookieHeader) return null
+export const requireSupabaseAuth = createMiddleware({ type: 'function' })
+  .client(async ({ next }) => {
+    // On the client, get the current Supabase session token and send it as a header
+    let token: string | null = null
+    if (typeof window !== 'undefined') {
+      const { supabase } = await import('./client')
+      const { data } = await supabase.auth.getSession()
+      token = data?.session?.access_token ?? null
+    }
 
-  const match = cookieHeader
-    .split(';')
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${name}=`))
-
-  return match ? decodeURIComponent(match.slice(name.length + 1)) : null
-}
-
-export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server(
-  async ({ next }) => {
+    return next({
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+  })
+  .server(async ({ next }) => {
     const SUPABASE_URL = process.env.SUPABASE_URL;
     const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
 
@@ -25,17 +27,11 @@ export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server
     }
 
     const request = getRequest();
-
-    if (!request?.headers) {
-      throw new Error('Unauthorized: No request headers available')
-    }
-
-    const authHeader = request.headers.get('authorization');
-    const cookieToken = getCookieValue(request.headers.get('cookie'), 'sb-token')
+    const authHeader = request?.headers?.get('authorization');
 
     const token = authHeader?.startsWith('Bearer ')
       ? authHeader.replace('Bearer ', '')
-      : cookieToken
+      : null
 
     if (!token) {
       throw new Error('Unauthorized: Missing session token')
@@ -70,5 +66,4 @@ export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server
         claims: data.claims,
       },
     })
-  }
-)
+  })
