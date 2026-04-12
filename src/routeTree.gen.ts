@@ -20,6 +20,7 @@ import { Route as AuthenticatedDashboardRouteImport } from './routes/_authentica
 import { Route as AuthenticatedClientsRouteImport } from './routes/_authenticated/clients'
 import { Route as AuthenticatedPortalIndexRouteImport } from './routes/_authenticated/portal.index'
 import { Route as AuthenticatedClientsIndexRouteImport } from './routes/_authenticated/clients.index'
+import { Route as ApiNylasCallbackRouteImport } from './routes/api/nylas/callback'
 import { Route as AuthenticatedPortalUploadRouteImport } from './routes/_authenticated/portal.upload'
 import { Route as AuthenticatedPortalDocumentsRouteImport } from './routes/_authenticated/portal.documents'
 import { Route as AuthenticatedPortalConnectionsRouteImport } from './routes/_authenticated/portal.connections'
@@ -82,6 +83,11 @@ const AuthenticatedClientsIndexRoute =
     path: '/',
     getParentRoute: () => AuthenticatedClientsRoute,
   } as any)
+const ApiNylasCallbackRoute = ApiNylasCallbackRouteImport.update({
+  id: '/api/nylas/callback',
+  path: '/api/nylas/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthenticatedPortalUploadRoute =
   AuthenticatedPortalUploadRouteImport.update({
     id: '/upload',
@@ -126,6 +132,7 @@ export interface FileRoutesByFullPath {
   '/portal/connections': typeof AuthenticatedPortalConnectionsRoute
   '/portal/documents': typeof AuthenticatedPortalDocumentsRoute
   '/portal/upload': typeof AuthenticatedPortalUploadRoute
+  '/api/nylas/callback': typeof ApiNylasCallbackRoute
   '/clients/': typeof AuthenticatedClientsIndexRoute
   '/portal/': typeof AuthenticatedPortalIndexRoute
 }
@@ -141,6 +148,7 @@ export interface FileRoutesByTo {
   '/portal/connections': typeof AuthenticatedPortalConnectionsRoute
   '/portal/documents': typeof AuthenticatedPortalDocumentsRoute
   '/portal/upload': typeof AuthenticatedPortalUploadRoute
+  '/api/nylas/callback': typeof ApiNylasCallbackRoute
   '/clients': typeof AuthenticatedClientsIndexRoute
   '/portal': typeof AuthenticatedPortalIndexRoute
 }
@@ -160,6 +168,7 @@ export interface FileRoutesById {
   '/_authenticated/portal/connections': typeof AuthenticatedPortalConnectionsRoute
   '/_authenticated/portal/documents': typeof AuthenticatedPortalDocumentsRoute
   '/_authenticated/portal/upload': typeof AuthenticatedPortalUploadRoute
+  '/api/nylas/callback': typeof ApiNylasCallbackRoute
   '/_authenticated/clients/': typeof AuthenticatedClientsIndexRoute
   '/_authenticated/portal/': typeof AuthenticatedPortalIndexRoute
 }
@@ -179,6 +188,7 @@ export interface FileRouteTypes {
     | '/portal/connections'
     | '/portal/documents'
     | '/portal/upload'
+    | '/api/nylas/callback'
     | '/clients/'
     | '/portal/'
   fileRoutesByTo: FileRoutesByTo
@@ -194,6 +204,7 @@ export interface FileRouteTypes {
     | '/portal/connections'
     | '/portal/documents'
     | '/portal/upload'
+    | '/api/nylas/callback'
     | '/clients'
     | '/portal'
   id:
@@ -212,6 +223,7 @@ export interface FileRouteTypes {
     | '/_authenticated/portal/connections'
     | '/_authenticated/portal/documents'
     | '/_authenticated/portal/upload'
+    | '/api/nylas/callback'
     | '/_authenticated/clients/'
     | '/_authenticated/portal/'
   fileRoutesById: FileRoutesById
@@ -221,6 +233,7 @@ export interface RootRouteChildren {
   AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
   LoginRoute: typeof LoginRoute
   RegisterRoute: typeof RegisterRoute
+  ApiNylasCallbackRoute: typeof ApiNylasCallbackRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -301,6 +314,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/clients/'
       preLoaderRoute: typeof AuthenticatedClientsIndexRouteImport
       parentRoute: typeof AuthenticatedClientsRoute
+    }
+    '/api/nylas/callback': {
+      id: '/api/nylas/callback'
+      path: '/api/nylas/callback'
+      fullPath: '/api/nylas/callback'
+      preLoaderRoute: typeof ApiNylasCallbackRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/_authenticated/portal/upload': {
       id: '/_authenticated/portal/upload'
@@ -397,6 +417,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRoute: AuthenticatedRouteWithChildren,
   LoginRoute: LoginRoute,
   RegisterRoute: RegisterRoute,
+  ApiNylasCallbackRoute: ApiNylasCallbackRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
