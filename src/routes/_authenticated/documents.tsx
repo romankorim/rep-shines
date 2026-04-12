@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FileText, Mail, Upload, Building2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { documentsQueryOptions } from "@/lib/query-options";
 import { useState } from "react";
 
 export const Route = createFileRoute("/_authenticated/documents")({
@@ -28,21 +28,11 @@ const sourceIcons: Record<string, typeof Mail> = {
 
 function DocumentsPage() {
   const [tab, setTab] = useState("pending");
+  const { data: documents = [] } = useQuery(documentsQueryOptions());
 
-  const { data: documents = [] } = useQuery({
-    queryKey: ["all-documents"],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("documents")
-        .select("*, clients!inner(name, company_name)")
-        .order("created_at", { ascending: false });
-      return data ?? [];
-    },
-  });
-
-  const pending = documents.filter((d) => d.status === "pending_approval");
-  const approved = documents.filter((d) => d.status === "approved");
-  const other = documents.filter((d) => !["pending_approval", "approved"].includes(d.status));
+  const pending = documents.filter((d: any) => d.status === "pending_approval");
+  const approved = documents.filter((d: any) => d.status === "approved");
+  const other = documents.filter((d: any) => !["pending_approval", "approved"].includes(d.status));
 
   const tabDocs = tab === "pending" ? pending : tab === "approved" ? approved : other;
 
@@ -71,7 +61,7 @@ function DocumentsPage() {
               </Card>
             ) : (
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {tabDocs.map((doc) => {
+                {tabDocs.map((doc: any) => {
                   const SourceIcon = sourceIcons[doc.source] || FileText;
                   const status = statusConfig[doc.status] || { label: doc.status, class: "bg-muted text-muted-foreground" };
                   const isOverdue = doc.due_date && new Date(doc.due_date) < new Date() && doc.status !== "approved";
@@ -79,22 +69,17 @@ function DocumentsPage() {
                   return (
                     <Card key={doc.id} className="cursor-pointer hover:shadow-md transition-all relative">
                       <CardContent className="p-3">
-                        {/* Thumbnail area */}
                         <div className="relative bg-muted/30 rounded-none h-32 flex items-center justify-center mb-3">
                           <FileText className="h-8 w-8 text-muted-foreground/50" />
-                          {/* Status badge */}
                           <span className={`absolute top-2 left-2 inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium rounded-none ${status.class}`}>
                             {status.label}
                           </span>
-                          {/* Source icon */}
                           <SourceIcon className="absolute top-2 right-2 h-3.5 w-3.5 text-muted-foreground" />
-                          {/* Overdue badge */}
                           {isOverdue && (
                             <span className="absolute bottom-2 left-2 inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium bg-destructive/15 text-destructive rounded-none">
                               Po splatnosti
                             </span>
                           )}
-                          {/* AI confidence bar */}
                           {doc.ai_confidence != null && (
                             <div className="absolute bottom-0 left-0 right-0 h-1">
                               <div
@@ -105,7 +90,6 @@ function DocumentsPage() {
                           )}
                         </div>
 
-                        {/* Info */}
                         <p className="text-sm font-medium truncate">{doc.supplier_name || doc.file_name || "Neznámy dodávateľ"}</p>
                         <p className="text-xs font-semibold mt-1">
                           {doc.total_amount ? `${Number(doc.total_amount).toLocaleString("sk-SK")} €` : "Suma neextrahovaná"}
@@ -118,9 +102,8 @@ function DocumentsPage() {
                             <p className="text-[10px] text-muted-foreground">č. {doc.document_number}</p>
                           )}
                         </div>
-                        {/* Client name */}
                         <p className="text-[10px] text-primary mt-1 truncate">
-                          {(doc as any).clients?.name || ""}
+                          {doc.clients?.name || ""}
                         </p>
                       </CardContent>
                     </Card>

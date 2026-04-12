@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { useAuth } from "@/hooks/use-auth";
-import { supabase } from "@/integrations/supabase/client";
+import { createOffice } from "@/lib/server-functions";
 
 export const Route = createFileRoute("/register")({
   head: () => ({
@@ -41,7 +41,6 @@ function RegisterPage() {
     setError("");
     setLoading(true);
 
-    // Sign up the user
     const { error: signUpError } = await signUp(form.email, form.password, form.name);
     if (signUpError) {
       setError(signUpError);
@@ -49,7 +48,16 @@ function RegisterPage() {
       return;
     }
 
-    // Store office data in user metadata for later use (office will be created after email confirmation)
+    // Office will be created after email confirmation + first login
+    // Store office data in localStorage temporarily
+    if (typeof window !== "undefined" && form.officeName) {
+      localStorage.setItem("fantozzi_pending_office", JSON.stringify({
+        name: form.officeName,
+        ico: form.ico,
+        dic: form.dic,
+      }));
+    }
+
     setSuccess(true);
     setLoading(false);
   }

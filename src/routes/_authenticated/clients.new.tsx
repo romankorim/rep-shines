@@ -5,8 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/hooks/use-auth";
+import { createClient } from "@/lib/server-functions";
 import { useQueryClient } from "@tanstack/react-query";
 
 export const Route = createFileRoute("/_authenticated/clients/new")({
@@ -15,7 +14,6 @@ export const Route = createFileRoute("/_authenticated/clients/new")({
 
 function NewClientPage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -39,54 +37,21 @@ function NewClientPage() {
     setLoading(true);
 
     try {
-      // Get or create office
-      const { data: offices } = await supabase
-        .from("accountant_offices")
-        .select("id")
-        .eq("user_id", user!.id)
-        .limit(1);
-
-      let officeId: string;
-      if (offices && offices.length > 0) {
-        officeId = offices[0].id;
-      } else {
-        const { data: newOffice, error: officeError } = await supabase
-          .from("accountant_offices")
-          .insert({ user_id: user!.id, name: "Moja kancelária" })
-          .select("id")
-          .single();
-        if (officeError) throw officeError;
-        officeId = newOffice.id;
-      }
-
-      // Create client
-      const { data: newClient, error: clientError } = await supabase
-        .from("clients")
-        .insert({
-          office_id: officeId,
+      await createClient({
+        data: {
           name: form.name,
           email: form.email,
-          company_name: form.companyName || null,
-          ico: form.ico || null,
-          dic: form.dic || null,
-          ic_dph: form.icDph || null,
-          notes: form.notes || null,
-          status: "invited",
-        })
-        .select("id")
-        .single();
-
-      if (clientError) throw clientError;
-
-      // Create invitation if requested
-      if (sendInvite && newClient) {
-        await supabase.from("client_invitations").insert({
-          client_id: newClient.id,
-          office_id: officeId,
-        });
-      }
+          companyName: form.companyName || undefined,
+          ico: form.ico || undefined,
+          dic: form.dic || undefined,
+          icDph: form.icDph || undefined,
+          notes: form.notes || undefined,
+          sendInvite,
+        },
+      });
 
       await queryClient.invalidateQueries({ queryKey: ["clients"] });
+      await queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
       navigate({ to: "/clients" });
     } catch (err: any) {
       setError(err.message || "Chyba pri vytváraní klienta");

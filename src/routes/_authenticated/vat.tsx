@@ -3,7 +3,7 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { vatQueryOptions } from "@/lib/query-options";
 
 export const Route = createFileRoute("/_authenticated/vat")({
   component: VatPage,
@@ -11,49 +11,21 @@ export const Route = createFileRoute("/_authenticated/vat")({
 
 function VatPage() {
   const now = new Date();
-  const currentMonth = now.getMonth(); // 0-indexed
+  const currentMonth = now.getMonth() + 1; // 1-indexed for DB
   const currentYear = now.getFullYear();
-  const deadline = new Date(currentYear, currentMonth, 25);
+  const deadline = new Date(currentYear, now.getMonth(), 25);
   const daysLeft = Math.max(0, Math.ceil((deadline.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
 
   const deadlineColor = daysLeft <= 5 ? "bg-destructive/15 text-destructive" : daysLeft <= 10 ? "bg-warning/15 text-warning-foreground" : "bg-success/15 text-success";
 
   const monthNames = ["Január", "Február", "Marec", "Apríl", "Máj", "Jún", "Júl", "August", "September", "Október", "November", "December"];
 
-  const { data: clients = [] } = useQuery({
-    queryKey: ["clients"],
-    queryFn: async () => {
-      const { data } = await supabase.from("clients").select("*").order("name");
-      return data ?? [];
-    },
-  });
+  const { data } = useQuery(vatQueryOptions(currentMonth, currentYear));
 
-  const { data: documents = [] } = useQuery({
-    queryKey: ["vat-documents"],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("documents")
-        .select("client_id, status")
-        .eq("tax_period_month", currentMonth + 1)
-        .eq("tax_period_year", currentYear);
-      return data ?? [];
-    },
-  });
-
-  // Group docs by client
-  const clientStats = clients.map((client) => {
-    const clientDocs = documents.filter((d) => d.client_id === client.id);
-    const total = clientDocs.length;
-    const approved = clientDocs.filter((d) => d.status === "approved").length;
-    const pending = clientDocs.filter((d) => d.status === "pending_approval").length;
-    const completeness = total > 0 ? Math.round((approved / total) * 100) : 0;
-    const status = total === 0 ? "none" : approved === total ? "complete" : "pending";
-    return { ...client, total, approved, pending, completeness, vatStatus: status };
-  });
-
-  const complete = clientStats.filter((c) => c.vatStatus === "complete").length;
-  const pendingCount = clientStats.filter((c) => c.vatStatus === "pending").length;
-  const noneCount = clientStats.filter((c) => c.vatStatus === "none").length;
+  const clientStats = data?.clients ?? [];
+  const complete = data?.complete ?? 0;
+  const pendingCount = data?.pending ?? 0;
+  const noneCount = data?.none ?? 0;
 
   return (
     <DashboardLayout>
@@ -62,7 +34,7 @@ function VatPage() {
           <div>
             <h1 className="text-lg sm:text-xl font-semibold tracking-tight">DPH priznania</h1>
             <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-              {monthNames[currentMonth]} {currentYear}
+              {monthNames[now.getMonth()]} {currentYear}
             </p>
           </div>
           <span className={`inline-flex items-center px-3 py-1 text-xs font-medium rounded-none ${deadlineColor}`}>
@@ -70,7 +42,6 @@ function VatPage() {
           </span>
         </div>
 
-        {/* Summary */}
         <div className="grid grid-cols-3 gap-3">
           <Card><CardContent className="p-4 text-center">
             <p className="text-2xl font-bold text-success">{complete}</p>
@@ -86,9 +57,8 @@ function VatPage() {
           </CardContent></Card>
         </div>
 
-        {/* Client list */}
         <div className="space-y-2">
-          {clientStats.map((client) => (
+          {clientStats.map((client: any) => (
             <Card key={client.id} className={`transition-colors ${
               client.vatStatus === "complete" ? "border-success/30 bg-success/5" :
               client.vatStatus === "pending" ? "border-warning/30 bg-warning/5" :

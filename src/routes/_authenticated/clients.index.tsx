@@ -4,20 +4,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Plus, Users } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { clientsQueryOptions } from "@/lib/query-options";
 
 export const Route = createFileRoute("/_authenticated/clients/")({
   component: ClientsPage,
 });
 
 function ClientsPage() {
-  const { data: clients = [], isLoading } = useQuery({
-    queryKey: ["clients"],
-    queryFn: async () => {
-      const { data } = await supabase.from("clients").select("*").order("created_at", { ascending: false });
-      return data ?? [];
-    },
-  });
+  const { data: clients = [], isLoading } = useQuery(clientsQueryOptions());
 
   const statusColors: Record<string, string> = {
     invited: "bg-warning/15 text-warning-foreground border-warning/30",
