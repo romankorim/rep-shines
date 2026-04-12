@@ -11,10 +11,12 @@ import {
   getNylasConnectUrl,
   exchangeNylasCode,
   triggerEmailScan,
+} from "@/lib/server-functions";
+import {
   initBankConnection,
   completeBankConnection,
   syncBankTransactions,
-} from "@/lib/server-functions";
+} from "@/lib/server-functions/bank";
 
 export const Route = createFileRoute("/_authenticated/clients/$clientId")({
   component: ClientDetailPage,
