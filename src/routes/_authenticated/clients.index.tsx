@@ -11,7 +11,8 @@ export const Route = createFileRoute("/_authenticated/clients/")({
 });
 
 function ClientsPage() {
-  const { data: clients = [], isLoading } = useQuery(clientsQueryOptions());
+  const { data: rawClients = [], isLoading } = useQuery(clientsQueryOptions());
+  const clients = Array.isArray(rawClients) ? rawClients : [];
 
   const statusColors: Record<string, string> = {
     invited: "bg-warning/15 text-warning-foreground border-warning/30",
