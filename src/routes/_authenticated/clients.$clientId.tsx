@@ -1,15 +1,19 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useSearch } from "@tanstack/react-router";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { FileText, Mail, Building2, ArrowLeft } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { FileText, Mail, Building2, ArrowLeft, Loader2, Upload } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clientQueryOptions } from "@/lib/query-options";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { DocumentViewer } from "@/components/documents/DocumentViewer";
+import { getNylasConnectUrl, exchangeNylasCode } from "@/lib/server-functions";
 
 export const Route = createFileRoute("/_authenticated/clients/$clientId")({
   component: ClientDetailPage,
+  validateSearch: (search: Record<string, unknown>) => ({
+    nylas_code: (search.nylas_code as string) || undefined,
+  } as { nylas_code?: string }),
 });
 
 const statusConfig: Record<string, { label: string; class: string }> = {
@@ -23,14 +27,48 @@ const statusConfig: Record<string, { label: string; class: string }> = {
 
 function ClientDetailPage() {
   const { clientId } = Route.useParams();
+  const { nylas_code } = Route.useSearch();
   const { data, isLoading } = useQuery(clientQueryOptions(clientId));
   const [selectedDoc, setSelectedDoc] = useState<any>(null);
+  const [connectingEmail, setConnectingEmail] = useState(false);
+  const [exchangingCode, setExchangingCode] = useState(false);
+  const queryClient = useQueryClient();
+
+  // Handle Nylas OAuth callback
+  useEffect(() => {
+    if (nylas_code && !exchangingCode) {
+      setExchangingCode(true);
+      exchangeNylasCode({ data: { code: nylas_code, clientId } })
+        .then(() => {
+          queryClient.invalidateQueries({ queryKey: ["client", clientId] });
+          // Clean URL
+          window.history.replaceState({}, "", `/clients/${clientId}`);
+        })
+        .catch((err) => {
+          console.error("Nylas exchange failed:", err);
+        })
+        .finally(() => setExchangingCode(false));
+    }
+  }, [nylas_code]);
 
   if (isLoading || !data) {
     return <DashboardLayout><div className="text-sm text-muted-foreground">Načítavam...</div></DashboardLayout>;
   }
 
   const { client, docCount, txCount, emailIntegration, bankIntegration, documents } = data;
+
+  async function handleConnectEmail() {
+    setConnectingEmail(true);
+    try {
+      const result = await getNylasConnectUrl({ data: { clientId } });
+      if (result?.url) {
+        window.location.href = result.url;
+      }
+    } catch (err) {
+      console.error("Failed to get Nylas URL:", err);
+      setConnectingEmail(false);
+    }
+  }
 
   return (
     <DashboardLayout>
@@ -44,6 +82,15 @@ function ClientDetailPage() {
             <p className="text-xs text-muted-foreground">{client.company_name || client.email}</p>
           </div>
         </div>
+
+        {exchangingCode && (
+          <Card className="border-primary/30 bg-primary/5">
+            <CardContent className="p-4 flex items-center gap-3">
+              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              <p className="text-sm">Pripájam e-mailový účet...</p>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Stats */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -81,13 +128,28 @@ function ClientDetailPage() {
                   <p className="text-sm">{emailIntegration.email_address}</p>
                   <div className="flex items-center gap-2">
                     <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-medium bg-success/15 text-success rounded-none">Aktívne</span>
-                    <Button size="sm" variant="outline">Synchronizovať</Button>
+                    {emailIntegration.last_sync_at && (
+                      <span className="text-[10px] text-muted-foreground">
+                        Posledný sken: {new Date(emailIntegration.last_sync_at).toLocaleString("sk-SK")}
+                      </span>
+                    )}
                   </div>
+                  <p className="text-[10px] text-muted-foreground">
+                    Automaticky skenuje nové emaily s prílohami (PDF, obrázky) a spúšťa AI extrakciu.
+                  </p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  <p className="text-xs text-muted-foreground">Automaticky skenuje faktúry v emailoch klienta (Gmail, Outlook)</p>
-                  <Button size="sm">Pripojiť e-mail</Button>
+                  <p className="text-xs text-muted-foreground">
+                    Pripojte e-mail klienta (Gmail, Outlook) pre automatické skenovanie faktúr z príloh.
+                  </p>
+                  <Button size="sm" onClick={handleConnectEmail} disabled={connectingEmail}>
+                    {connectingEmail ? (
+                      <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> Pripájam...</>
+                    ) : (
+                      <><Mail className="h-3.5 w-3.5 mr-1" /> Pripojiť e-mail</>
+                    )}
+                  </Button>
                 </div>
               )}
             </CardContent>
@@ -141,6 +203,9 @@ function ClientDetailPage() {
                         <span className={`inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium rounded-none ${status.class}`}>
                           {status.label}
                         </span>
+                        {doc.source === "email" && (
+                          <Mail className="h-3 w-3 text-muted-foreground" />
+                        )}
                       </div>
                       <p className="text-sm font-medium truncate">{doc.supplier_name || doc.file_name || "Neznámy"}</p>
                       <p className="text-xs text-muted-foreground mt-1">
