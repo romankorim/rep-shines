@@ -39,7 +39,8 @@ function DashboardPage() {
   }, [user]);
 
   const { data: stats } = useQuery(dashboardStatsQueryOptions());
-  const { data: clients = [] } = useQuery(clientsQueryOptions());
+  const { data: rawClients = [] } = useQuery(clientsQueryOptions());
+  const clients = Array.isArray(rawClients) ? rawClients : [];
 
   const statCards = [
     { label: "Celkový počet klientov", value: stats?.totalClients ?? 0, icon: Users },

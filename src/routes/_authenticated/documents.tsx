@@ -30,7 +30,8 @@ const sourceIcons: Record<string, typeof Mail> = {
 
 function DocumentsPage() {
   const [tab, setTab] = useState("pending");
-  const { data: documents = [] } = useQuery(documentsQueryOptions());
+  const { data: rawDocuments = [] } = useQuery(documentsQueryOptions());
+  const documents = Array.isArray(rawDocuments) ? rawDocuments : [];
   const [selectedDoc, setSelectedDoc] = useState<any>(null);
 
   const pending = documents.filter((d: any) => d.status === "pending_approval");

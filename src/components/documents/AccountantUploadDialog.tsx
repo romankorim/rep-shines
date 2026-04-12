@@ -23,7 +23,8 @@ export function AccountantUploadDialog() {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
-  const { data: clients = [] } = useQuery(clientsQueryOptions());
+  const { data: rawClients = [] } = useQuery(clientsQueryOptions());
+  const clients = Array.isArray(rawClients) ? rawClients : [];
 
   function handleFiles(newFiles: FileList | null) {
     if (!newFiles) return;
