@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { documentsQueryOptions } from "@/lib/query-options";
 import { useState } from "react";
 import { DocumentViewer } from "@/components/documents/DocumentViewer";
+import { AccountantUploadDialog } from "@/components/documents/AccountantUploadDialog";
 
 export const Route = createFileRoute("/_authenticated/documents")({
   component: DocumentsPage,
