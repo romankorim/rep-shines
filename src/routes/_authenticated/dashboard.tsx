@@ -21,7 +21,7 @@ function DashboardPage() {
 
   // Auto-create office from pending registration data
   useEffect(() => {
-    if (officeCreated.current || typeof window === "undefined") return;
+    if (officeCreated.current) return;
     const pending = localStorage.getItem("fantozzi_pending_office");
     if (pending && user) {
       officeCreated.current = true;
