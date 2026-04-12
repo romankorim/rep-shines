@@ -5,3 +5,4 @@ export { getDocuments, updateDocumentStatus, updateDocumentFields, createDocumen
 export { getVatOverview } from "./vat";
 export { getPortalStats, getPortalDocuments } from "./portal";
 export { getNylasConnectUrl, exchangeNylasCode, disconnectEmail, triggerEmailScan } from "./nylas";
+export { initBankConnection, completeBankConnection, syncBankTransactions } from "./bank";
