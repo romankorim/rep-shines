@@ -88,5 +88,22 @@ export const createDocumentRecord = createServerFn({ method: "POST" })
       .single();
 
     if (error) throw new Error(error.message);
+
+    // Trigger AI extraction asynchronously
+    if (doc) {
+      const supabaseUrl = process.env.SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL;
+      const anonKey = process.env.SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      if (supabaseUrl && anonKey) {
+        fetch(`${supabaseUrl}/functions/v1/extract-document`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${anonKey}`,
+          },
+          body: JSON.stringify({ documentId: doc.id }),
+        }).catch((err) => console.error("Failed to trigger extraction:", err));
+      }
+    }
+
     return doc;
   });
