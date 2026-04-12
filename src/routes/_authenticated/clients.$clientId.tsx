@@ -2,19 +2,20 @@ import { createFileRoute, Link, useSearch } from "@tanstack/react-router";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { FileText, Mail, Building2, ArrowLeft, Loader2, Upload } from "lucide-react";
+import { FileText, Mail, Building2, ArrowLeft, Loader2, Upload, RefreshCw } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clientQueryOptions } from "@/lib/query-options";
 import { useState, useEffect } from "react";
 import { DocumentViewer } from "@/components/documents/DocumentViewer";
-import { getNylasConnectUrl, exchangeNylasCode, triggerEmailScan } from "@/lib/server-functions";
-import { RefreshCw } from "lucide-react";
+import { getNylasConnectUrl, exchangeNylasCode, triggerEmailScan, initBankConnection, completeBankConnection, syncBankTransactions } from "@/lib/server-functions";
 
 export const Route = createFileRoute("/_authenticated/clients/$clientId")({
   component: ClientDetailPage,
   validateSearch: (search: Record<string, unknown>) => ({
     nylas_code: (search.nylas_code as string) || undefined,
-  } as { nylas_code?: string }),
+    bank_connected: (search.bank_connected as string) || undefined,
+    connection_id: (search.connection_id as string) || undefined,
+  } as { nylas_code?: string; bank_connected?: string; connection_id?: string }),
 });
 
 const statusConfig: Record<string, { label: string; class: string }> = {
@@ -28,12 +29,14 @@ const statusConfig: Record<string, { label: string; class: string }> = {
 
 function ClientDetailPage() {
   const { clientId } = Route.useParams();
-  const { nylas_code } = Route.useSearch();
+  const { nylas_code, bank_connected, connection_id } = Route.useSearch();
   const { data, isLoading } = useQuery(clientQueryOptions(clientId));
   const [selectedDoc, setSelectedDoc] = useState<any>(null);
   const [connectingEmail, setConnectingEmail] = useState(false);
   const [exchangingCode, setExchangingCode] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [connectingBank, setConnectingBank] = useState(false);
+  const [syncingBank, setSyncingBank] = useState(false);
   const queryClient = useQueryClient();
 
   // Handle Nylas OAuth callback
@@ -52,6 +55,23 @@ function ClientDetailPage() {
         .finally(() => setExchangingCode(false));
     }
   }, [nylas_code]);
+
+  // Handle Salt Edge bank callback
+  useEffect(() => {
+    if (bank_connected && connection_id) {
+      completeBankConnection({ data: { clientId, connectionId: connection_id } })
+        .then(() => {
+          queryClient.invalidateQueries({ queryKey: ["client", clientId] });
+          // Automatically sync transactions after connection
+          return syncBankTransactions({ data: { clientId } });
+        })
+        .then(() => {
+          queryClient.invalidateQueries({ queryKey: ["client", clientId] });
+          window.history.replaceState({}, "", `/clients/${clientId}`);
+        })
+        .catch((err) => console.error("Bank connection failed:", err));
+    }
+  }, [bank_connected, connection_id]);
 
   if (isLoading || !data) {
     return <DashboardLayout><div className="text-sm text-muted-foreground">Načítavam...</div></DashboardLayout>;
