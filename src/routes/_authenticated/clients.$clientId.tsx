@@ -7,7 +7,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clientQueryOptions } from "@/lib/query-options";
 import { useState, useEffect } from "react";
 import { DocumentViewer } from "@/components/documents/DocumentViewer";
-import { getNylasConnectUrl, exchangeNylasCode } from "@/lib/server-functions";
+import { getNylasConnectUrl, exchangeNylasCode, triggerEmailScan } from "@/lib/server-functions";
+import { RefreshCw } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/clients/$clientId")({
   component: ClientDetailPage,
@@ -32,6 +33,7 @@ function ClientDetailPage() {
   const [selectedDoc, setSelectedDoc] = useState<any>(null);
   const [connectingEmail, setConnectingEmail] = useState(false);
   const [exchangingCode, setExchangingCode] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const queryClient = useQueryClient();
 
   // Handle Nylas OAuth callback
@@ -134,8 +136,32 @@ function ClientDetailPage() {
                       </span>
                     )}
                   </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={scanning}
+                      onClick={async () => {
+                        setScanning(true);
+                        try {
+                          const result = await triggerEmailScan({ data: { clientId } });
+                          queryClient.invalidateQueries({ queryKey: ["client", clientId] });
+                        } catch (err) {
+                          console.error("Scan failed:", err);
+                        } finally {
+                          setScanning(false);
+                        }
+                      }}
+                    >
+                      {scanning ? (
+                        <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> Skenujem...</>
+                      ) : (
+                        <><RefreshCw className="h-3.5 w-3.5 mr-1" /> Synchronizovať</>
+                      )}
+                    </Button>
+                  </div>
                   <p className="text-[10px] text-muted-foreground">
-                    Automaticky skenuje nové emaily s prílohami (PDF, obrázky) a spúšťa AI extrakciu.
+                    Automatický sken každých 15 min. Alebo kliknite pre okamžitú synchronizáciu.
                   </p>
                 </div>
               ) : (
