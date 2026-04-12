@@ -4,47 +4,48 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Users, FileText, Clock, Link2, Plus } from "lucide-react";
 import { Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { clientsQueryOptions, dashboardStatsQueryOptions } from "@/lib/query-options";
+import { createOffice } from "@/lib/server-functions";
+import { useAuth } from "@/hooks/use-auth";
+import { useEffect, useRef } from "react";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   component: DashboardPage,
 });
 
 function DashboardPage() {
-  const { data: clients = [] } = useQuery({
-    queryKey: ["clients"],
-    queryFn: async () => {
-      const { data } = await supabase.from("clients").select("*").order("created_at", { ascending: false }).limit(10);
-      return data ?? [];
-    },
-  });
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const officeCreated = useRef(false);
 
-  const { data: docStats } = useQuery({
-    queryKey: ["document-stats"],
-    queryFn: async () => {
-      const now = new Date();
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-      
-      const { count: totalDocs } = await supabase.from("documents").select("*", { count: "exact", head: true }).gte("created_at", startOfMonth);
-      const { count: pendingDocs } = await supabase.from("documents").select("*", { count: "exact", head: true }).eq("status", "pending_approval");
-      const pendingClients = clients.filter((c) => c.status === "invited").length;
+  // Auto-create office from pending registration data
+  useEffect(() => {
+    if (officeCreated.current || typeof window === "undefined") return;
+    const pending = localStorage.getItem("fantozzi_pending_office");
+    if (pending && user) {
+      officeCreated.current = true;
+      try {
+        const officeData = JSON.parse(pending);
+        createOffice({ data: { name: officeData.name || "Moja kancelária", ico: officeData.ico, dic: officeData.dic } })
+          .then(() => {
+            localStorage.removeItem("fantozzi_pending_office");
+            queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+            queryClient.invalidateQueries({ queryKey: ["current-user"] });
+          })
+          .catch(() => {});
+      } catch {}
+    }
+  }, [user]);
 
-      return {
-        totalClients: clients.length,
-        docsThisMonth: totalDocs ?? 0,
-        pendingApproval: pendingDocs ?? 0,
-        pendingConnection: pendingClients,
-      };
-    },
-    enabled: clients.length >= 0,
-  });
+  const { data: stats } = useQuery(dashboardStatsQueryOptions());
+  const { data: clients = [] } = useQuery(clientsQueryOptions());
 
-  const stats = [
-    { label: "Celkový počet klientov", value: docStats?.totalClients ?? 0, icon: Users },
-    { label: "Doklady tento mesiac", value: docStats?.docsThisMonth ?? 0, icon: FileText },
-    { label: "Čakajúce na schválenie", value: docStats?.pendingApproval ?? 0, icon: Clock },
-    { label: "Čakajú na pripojenie", value: docStats?.pendingConnection ?? 0, icon: Link2 },
+  const statCards = [
+    { label: "Celkový počet klientov", value: stats?.totalClients ?? 0, icon: Users },
+    { label: "Doklady tento mesiac", value: stats?.docsThisMonth ?? 0, icon: FileText },
+    { label: "Čakajúce na schválenie", value: stats?.pendingApproval ?? 0, icon: Clock },
+    { label: "Čakajú na pripojenie", value: stats?.pendingConnection ?? 0, icon: Link2 },
   ];
 
   const statusColors: Record<string, string> = {
@@ -61,6 +62,8 @@ function DashboardPage() {
     archived: "Archivovaný",
   };
 
+  const displayClients = clients.slice(0, 10);
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -71,7 +74,7 @@ function DashboardPage() {
 
         {/* Stats */}
         <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-          {stats.map((s) => (
+          {statCards.map((s) => (
             <Card key={s.label}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
@@ -89,7 +92,7 @@ function DashboardPage() {
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold">Klienti</h2>
             <div className="flex items-center gap-2">
-              {clients.length > 0 && (
+              {clients.length > 10 && (
                 <Link to="/clients" className="text-xs text-primary hover:underline">
                   Zobraziť všetkých
                 </Link>
@@ -103,7 +106,7 @@ function DashboardPage() {
             </div>
           </div>
 
-          {clients.length === 0 ? (
+          {displayClients.length === 0 ? (
             <Card>
               <CardContent className="p-8 text-center">
                 <Users className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
@@ -119,7 +122,7 @@ function DashboardPage() {
             </Card>
           ) : (
             <div className="space-y-2">
-              {clients.map((client) => (
+              {displayClients.map((client) => (
                 <Link key={client.id} to="/clients/$clientId" params={{ clientId: client.id }}>
                   <Card className="hover:bg-muted/20 transition-colors cursor-pointer">
                     <CardContent className="p-3 flex items-center gap-3">
