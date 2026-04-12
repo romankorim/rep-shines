@@ -14,6 +14,36 @@ export type Database = {
   }
   public: {
     Tables: {
+      accountant_offices: {
+        Row: {
+          created_at: string
+          dic: string | null
+          ico: string | null
+          id: string
+          name: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          dic?: string | null
+          ico?: string | null
+          id?: string
+          name: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          dic?: string | null
+          ico?: string | null
+          id?: string
+          name?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       audit_log: {
         Row: {
           action: string
@@ -43,6 +73,234 @@ export type Database = {
           user_id?: string | null
         }
         Relationships: []
+      }
+      bank_integrations: {
+        Row: {
+          bank_name: string | null
+          client_id: string
+          consent_expires_at: string | null
+          created_at: string
+          id: string
+          last_sync_at: string | null
+          office_id: string
+          provider: string | null
+          salt_edge_connection_id: string | null
+          status: Database["public"]["Enums"]["integration_status"]
+          updated_at: string
+        }
+        Insert: {
+          bank_name?: string | null
+          client_id: string
+          consent_expires_at?: string | null
+          created_at?: string
+          id?: string
+          last_sync_at?: string | null
+          office_id: string
+          provider?: string | null
+          salt_edge_connection_id?: string | null
+          status?: Database["public"]["Enums"]["integration_status"]
+          updated_at?: string
+        }
+        Update: {
+          bank_name?: string | null
+          client_id?: string
+          consent_expires_at?: string | null
+          created_at?: string
+          id?: string
+          last_sync_at?: string | null
+          office_id?: string
+          provider?: string | null
+          salt_edge_connection_id?: string | null
+          status?: Database["public"]["Enums"]["integration_status"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bank_integrations_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_integrations_office_id_fkey"
+            columns: ["office_id"]
+            isOneToOne: false
+            referencedRelation: "accountant_offices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bank_transactions: {
+        Row: {
+          amount: number
+          bank_name: string | null
+          client_id: string
+          counterparty_name: string | null
+          created_at: string
+          currency: string | null
+          description: string | null
+          external_id: string | null
+          id: string
+          matched_document_id: string | null
+          office_id: string
+          transaction_date: string
+          variable_symbol: string | null
+        }
+        Insert: {
+          amount: number
+          bank_name?: string | null
+          client_id: string
+          counterparty_name?: string | null
+          created_at?: string
+          currency?: string | null
+          description?: string | null
+          external_id?: string | null
+          id?: string
+          matched_document_id?: string | null
+          office_id: string
+          transaction_date: string
+          variable_symbol?: string | null
+        }
+        Update: {
+          amount?: number
+          bank_name?: string | null
+          client_id?: string
+          counterparty_name?: string | null
+          created_at?: string
+          currency?: string | null
+          description?: string | null
+          external_id?: string | null
+          id?: string
+          matched_document_id?: string | null
+          office_id?: string
+          transaction_date?: string
+          variable_symbol?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bank_transactions_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_transactions_matched_document_id_fkey"
+            columns: ["matched_document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_transactions_office_id_fkey"
+            columns: ["office_id"]
+            isOneToOne: false
+            referencedRelation: "accountant_offices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      client_invitations: {
+        Row: {
+          client_id: string
+          created_at: string
+          expires_at: string
+          id: string
+          office_id: string
+          status: Database["public"]["Enums"]["invitation_status"]
+          token: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          expires_at?: string
+          id?: string
+          office_id: string
+          status?: Database["public"]["Enums"]["invitation_status"]
+          token?: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          expires_at?: string
+          id?: string
+          office_id?: string
+          status?: Database["public"]["Enums"]["invitation_status"]
+          token?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_invitations_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_invitations_office_id_fkey"
+            columns: ["office_id"]
+            isOneToOne: false
+            referencedRelation: "accountant_offices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      clients: {
+        Row: {
+          company_name: string | null
+          created_at: string
+          dic: string | null
+          email: string
+          ic_dph: string | null
+          ico: string | null
+          id: string
+          name: string
+          notes: string | null
+          office_id: string
+          status: Database["public"]["Enums"]["client_status"]
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          company_name?: string | null
+          created_at?: string
+          dic?: string | null
+          email: string
+          ic_dph?: string | null
+          ico?: string | null
+          id?: string
+          name: string
+          notes?: string | null
+          office_id: string
+          status?: Database["public"]["Enums"]["client_status"]
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          company_name?: string | null
+          created_at?: string
+          dic?: string | null
+          email?: string
+          ic_dph?: string | null
+          ico?: string | null
+          id?: string
+          name?: string
+          notes?: string | null
+          office_id?: string
+          status?: Database["public"]["Enums"]["client_status"]
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clients_office_id_fkey"
+            columns: ["office_id"]
+            isOneToOne: false
+            referencedRelation: "accountant_offices"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       comp_plans: {
         Row: {
@@ -164,6 +422,195 @@ export type Database = {
             columns: ["rep_id"]
             isOneToOne: false
             referencedRelation: "reps"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      documents: {
+        Row: {
+          accountant_notes: string | null
+          accounting_code: string | null
+          ai_confidence: number | null
+          ai_raw_data: Json | null
+          client_id: string
+          created_at: string
+          currency: string | null
+          delivery_date: string | null
+          document_number: string | null
+          document_type: Database["public"]["Enums"]["document_type"] | null
+          due_date: string | null
+          expense_category: string | null
+          file_name: string | null
+          file_size: number | null
+          file_type: string | null
+          file_url: string | null
+          id: string
+          issue_date: string | null
+          matched_transaction_id: string | null
+          office_id: string
+          source: Database["public"]["Enums"]["document_source"]
+          source_email_id: string | null
+          status: Database["public"]["Enums"]["document_status"]
+          supplier_dic: string | null
+          supplier_ic_dph: string | null
+          supplier_ico: string | null
+          supplier_name: string | null
+          tax_base: number | null
+          tax_period_month: number | null
+          tax_period_year: number | null
+          thumbnail_url: string | null
+          total_amount: number | null
+          updated_at: string
+          variable_symbol: string | null
+          vat_amount: number | null
+          vat_breakdown: Json | null
+          vat_rate: number | null
+        }
+        Insert: {
+          accountant_notes?: string | null
+          accounting_code?: string | null
+          ai_confidence?: number | null
+          ai_raw_data?: Json | null
+          client_id: string
+          created_at?: string
+          currency?: string | null
+          delivery_date?: string | null
+          document_number?: string | null
+          document_type?: Database["public"]["Enums"]["document_type"] | null
+          due_date?: string | null
+          expense_category?: string | null
+          file_name?: string | null
+          file_size?: number | null
+          file_type?: string | null
+          file_url?: string | null
+          id?: string
+          issue_date?: string | null
+          matched_transaction_id?: string | null
+          office_id: string
+          source?: Database["public"]["Enums"]["document_source"]
+          source_email_id?: string | null
+          status?: Database["public"]["Enums"]["document_status"]
+          supplier_dic?: string | null
+          supplier_ic_dph?: string | null
+          supplier_ico?: string | null
+          supplier_name?: string | null
+          tax_base?: number | null
+          tax_period_month?: number | null
+          tax_period_year?: number | null
+          thumbnail_url?: string | null
+          total_amount?: number | null
+          updated_at?: string
+          variable_symbol?: string | null
+          vat_amount?: number | null
+          vat_breakdown?: Json | null
+          vat_rate?: number | null
+        }
+        Update: {
+          accountant_notes?: string | null
+          accounting_code?: string | null
+          ai_confidence?: number | null
+          ai_raw_data?: Json | null
+          client_id?: string
+          created_at?: string
+          currency?: string | null
+          delivery_date?: string | null
+          document_number?: string | null
+          document_type?: Database["public"]["Enums"]["document_type"] | null
+          due_date?: string | null
+          expense_category?: string | null
+          file_name?: string | null
+          file_size?: number | null
+          file_type?: string | null
+          file_url?: string | null
+          id?: string
+          issue_date?: string | null
+          matched_transaction_id?: string | null
+          office_id?: string
+          source?: Database["public"]["Enums"]["document_source"]
+          source_email_id?: string | null
+          status?: Database["public"]["Enums"]["document_status"]
+          supplier_dic?: string | null
+          supplier_ic_dph?: string | null
+          supplier_ico?: string | null
+          supplier_name?: string | null
+          tax_base?: number | null
+          tax_period_month?: number | null
+          tax_period_year?: number | null
+          thumbnail_url?: string | null
+          total_amount?: number | null
+          updated_at?: string
+          variable_symbol?: string | null
+          vat_amount?: number | null
+          vat_breakdown?: Json | null
+          vat_rate?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "documents_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "documents_office_id_fkey"
+            columns: ["office_id"]
+            isOneToOne: false
+            referencedRelation: "accountant_offices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      email_integrations: {
+        Row: {
+          client_id: string
+          created_at: string
+          email_address: string | null
+          id: string
+          last_sync_at: string | null
+          nylas_grant_id: string | null
+          office_id: string
+          provider: string | null
+          status: Database["public"]["Enums"]["integration_status"]
+          updated_at: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          email_address?: string | null
+          id?: string
+          last_sync_at?: string | null
+          nylas_grant_id?: string | null
+          office_id: string
+          provider?: string | null
+          status?: Database["public"]["Enums"]["integration_status"]
+          updated_at?: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          email_address?: string | null
+          id?: string
+          last_sync_at?: string | null
+          nylas_grant_id?: string | null
+          office_id?: string
+          provider?: string | null
+          status?: Database["public"]["Enums"]["integration_status"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_integrations_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "email_integrations_office_id_fkey"
+            columns: ["office_id"]
+            isOneToOne: false
+            referencedRelation: "accountant_offices"
             referencedColumns: ["id"]
           },
         ]
@@ -290,8 +737,27 @@ export type Database = {
       }
     }
     Enums: {
-      app_role: "admin" | "rep"
+      app_role: "admin" | "rep" | "client"
+      client_status: "invited" | "active" | "paused" | "archived"
       deal_status: "closed" | "open"
+      document_source: "email" | "upload" | "bank"
+      document_status:
+        | "processing"
+        | "pending_approval"
+        | "approved"
+        | "rejected"
+        | "duplicate"
+        | "error"
+      document_type:
+        | "received_invoice"
+        | "issued_invoice"
+        | "receipt"
+        | "credit_note"
+        | "advance_invoice"
+        | "bank_statement"
+        | "other"
+      integration_status: "connected" | "disconnected" | "error"
+      invitation_status: "pending" | "accepted" | "expired"
       quota_period: "month" | "quarter" | "year"
     }
     CompositeTypes: {
@@ -420,8 +886,29 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["admin", "rep"],
+      app_role: ["admin", "rep", "client"],
+      client_status: ["invited", "active", "paused", "archived"],
       deal_status: ["closed", "open"],
+      document_source: ["email", "upload", "bank"],
+      document_status: [
+        "processing",
+        "pending_approval",
+        "approved",
+        "rejected",
+        "duplicate",
+        "error",
+      ],
+      document_type: [
+        "received_invoice",
+        "issued_invoice",
+        "receipt",
+        "credit_note",
+        "advance_invoice",
+        "bank_statement",
+        "other",
+      ],
+      integration_status: ["connected", "disconnected", "error"],
+      invitation_status: ["pending", "accepted", "expired"],
       quota_period: ["month", "quarter", "year"],
     },
   },
