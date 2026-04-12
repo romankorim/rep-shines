@@ -1,7 +1,6 @@
 import { createFileRoute, Outlet, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { useAuth } from "@/hooks/use-auth";
-import { useRealtimeDeals } from "@/hooks/use-realtime-deals";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export const Route = createFileRoute("/_authenticated")({
@@ -11,7 +10,6 @@ export const Route = createFileRoute("/_authenticated")({
 function AuthenticatedLayout() {
   const { isAuthenticated, isLoading } = useAuth();
   const navigate = useNavigate();
-  useRealtimeDeals();
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
