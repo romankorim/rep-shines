@@ -15,6 +15,7 @@ export {
   exchangeNylasCode,
   disconnectEmail,
   triggerEmailScan,
+  resetEmailSyncPeriod,
 } from "./nylas";
 export {
   initBankConnection,

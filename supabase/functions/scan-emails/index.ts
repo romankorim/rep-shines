@@ -285,29 +285,36 @@ serve(async (req) => {
 
       if (candidateAttachments.length === 0) continue;
 
-      // Step 2: AI classification for all candidates in this email
-      const classifications = await classifyAttachmentsBatch(
-        candidateAttachments.map((a: any) => ({
-          filename: a.filename || "",
-          content_type: a.content_type || "",
-          size: a.size || 0,
-          id: a.id,
-        })),
-        emailSubject,
-        emailFrom,
-        lovableApiKey,
-      );
-
-      // Step 3: Process relevant attachments
+      // Step 2: Process every candidate using the actual file content.
+      // This avoids false negatives from generic subjects/filenames.
       for (const att of candidateAttachments) {
-        const classification = classifications.get(att.id);
-        if (!classification?.relevant) {
-          console.log(`AI skip: ${att.filename} — ${classification?.reason}`);
-          skippedCount++;
+        const normalizedMimeType = normalizeMimeType(att.content_type);
+        const filename = att.filename || "";
+
+        const dlResp = await fetch(
+          `${NYLAS_API}/grants/${grantId}/attachments/${att.id}/download?message_id=${msg.id}`,
+          { headers: { Authorization: `Bearer ${nylasApiKey}` } },
+        );
+
+        if (!dlResp.ok) {
+          console.error(`Failed to download attachment ${att.id}:`, dlResp.status);
           continue;
         }
 
-        // Check for duplicates; on refresh retry failed extractions
+        const fileBuffer = await dlResp.arrayBuffer();
+        const fileBytes = new Uint8Array(fileBuffer);
+        const visualClassification = await classifyAttachmentByContent(
+          {
+            filename,
+            content_type: normalizedMimeType,
+            size: att.size || fileBytes.length,
+            bytes: fileBytes,
+          },
+          emailSubject,
+          emailFrom,
+          lovableApiKey,
+        );
+
         const sourceEmailId = `nylas:${msg.id}:${att.id}`;
         const { data: existing } = await supabase
           .from("documents")
@@ -317,6 +324,37 @@ serve(async (req) => {
 
         if (existing && existing.length > 0) {
           const existingDoc = existing[0];
+          if (!visualClassification.relevant) {
+            console.log(`AI skip existing: ${filename} — ${visualClassification.reason}`);
+            await supabase
+              .from("documents")
+              .update({
+                status: "rejected",
+                document_type: null,
+                supplier_name: null,
+                supplier_ico: null,
+                supplier_dic: null,
+                supplier_ic_dph: null,
+                document_number: null,
+                variable_symbol: null,
+                issue_date: null,
+                due_date: null,
+                delivery_date: null,
+                total_amount: null,
+                currency: null,
+                tax_base: null,
+                vat_amount: null,
+                vat_rate: null,
+                vat_breakdown: null,
+                expense_category: null,
+                ai_confidence: 0,
+                ai_raw_data: { reason: visualClassification.reason, filtered_by_agent: true },
+              })
+              .eq("id", existingDoc.id);
+            skippedCount++;
+            continue;
+          }
+
           if (existingDoc.status === "error") {
             const anonKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY");
             if (anonKey) {
@@ -331,100 +369,18 @@ serve(async (req) => {
               if (!retryResp.ok) console.error("Retry extraction failed:", existingDoc.id, retryResp.status, await retryResp.text());
               processedCount++;
             }
-          } else if (["pending_approval", "approved", "rejected"].includes(existingDoc.status)) {
-            const normalizedMimeType = normalizeMimeType(att.content_type);
-            const canInspectVisually = normalizedMimeType === "application/pdf" || normalizedMimeType.startsWith("image/");
-
-            if (canInspectVisually) {
-              const dlResp = await fetch(
-                `${NYLAS_API}/grants/${grantId}/attachments/${att.id}/download?message_id=${msg.id}`,
-                { headers: { Authorization: `Bearer ${nylasApiKey}` } },
-              );
-
-              if (dlResp.ok) {
-                const fileBuffer = await dlResp.arrayBuffer();
-                const fileBytes = new Uint8Array(fileBuffer);
-                const review = await classifyAttachmentByContent(
-                  {
-                    filename: att.filename || "",
-                    content_type: normalizedMimeType,
-                    size: att.size || fileBytes.length,
-                    bytes: fileBytes,
-                  },
-                  emailSubject,
-                  emailFrom,
-                  lovableApiKey,
-                );
-
-                if (!review.relevant) {
-                  await supabase
-                    .from("documents")
-                    .update({
-                      status: "rejected",
-                      document_type: null,
-                      supplier_name: null,
-                      supplier_ico: null,
-                      supplier_dic: null,
-                      supplier_ic_dph: null,
-                      document_number: null,
-                      variable_symbol: null,
-                      issue_date: null,
-                      due_date: null,
-                      delivery_date: null,
-                      total_amount: null,
-                      currency: null,
-                      tax_base: null,
-                      vat_amount: null,
-                      vat_rate: null,
-                      vat_breakdown: null,
-                      expense_category: null,
-                      ai_confidence: 0,
-                      ai_raw_data: { reason: review.reason, filtered_by_agent: true },
-                    })
-                    .eq("id", existingDoc.id);
-                  skippedCount++;
-                }
-              }
-            }
           }
           continue;
         }
 
-        // Download attachment from Nylas
-        const dlResp = await fetch(
-          `${NYLAS_API}/grants/${grantId}/attachments/${att.id}/download?message_id=${msg.id}`,
-          { headers: { Authorization: `Bearer ${nylasApiKey}` } },
-        );
-
-        if (!dlResp.ok) {
-          console.error(`Failed to download attachment ${att.id}:`, dlResp.status);
-          continue;
-        }
-
-        const fileBuffer = await dlResp.arrayBuffer();
-        const fileBytes = new Uint8Array(fileBuffer);
-        const filename = att.filename || "";
-        const ext = filename.split(".").pop() || "pdf";
-        const storagePath = `${clientId}/${Date.now()}_email_${Math.random().toString(36).slice(2)}.${ext}`;
-        const normalizedMimeType = normalizeMimeType(att.content_type);
-
-        const visualClassification = await classifyAttachmentByContent(
-          {
-            filename,
-            content_type: normalizedMimeType,
-            size: att.size || fileBytes.length,
-            bytes: fileBytes,
-          },
-          emailSubject,
-          emailFrom,
-          lovableApiKey,
-        );
-
         if (!visualClassification.relevant) {
-          console.log(`AI skip after visual inspection: ${filename} — ${visualClassification.reason}`);
+          console.log(`AI skip: ${filename} — ${visualClassification.reason}`);
           skippedCount++;
           continue;
         }
+
+        const ext = filename.split(".").pop() || "pdf";
+        const storagePath = `${clientId}/${Date.now()}_email_${Math.random().toString(36).slice(2)}.${ext}`;
 
         console.log(`AI accepted: ${filename} — ${visualClassification.reason} (${visualClassification.signal})`);
 

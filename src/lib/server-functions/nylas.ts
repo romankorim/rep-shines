@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getRequest, getRequestHeader } from "@tanstack/react-start/server";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { z } from "zod";
 import dns from "node:dns";
 
@@ -53,6 +54,17 @@ function getCurrentRequestOrigin() {
   }
 
   return getStableAppUrl();
+}
+
+function getDocumentsStoragePath(url?: string | null) {
+  if (!url) return null;
+  const publicMarker = "/storage/v1/object/public/documents/";
+  const signedMarker = "/storage/v1/object/sign/documents/";
+
+  if (url.includes(publicMarker)) return url.split(publicMarker)[1]?.split("?")[0] || null;
+  if (url.includes(signedMarker)) return url.split(signedMarker)[1]?.split("?")[0] || null;
+
+  return null;
 }
 
 // Detect email provider via MX records (server-side DNS lookup)
@@ -277,6 +289,53 @@ export const triggerEmailScan = createServerFn({ method: "POST" })
 
     const result = await resp.json();
     return { success: true, processed: result.processed || 0, skipped: result.skipped || 0 };
+  });
+
+export const resetEmailSyncPeriod = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({
+    clientId: z.string().uuid(),
+    month: z.number().min(1).max(12),
+    year: z.number().min(2000).max(2100),
+  }))
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+
+    const { data: docs, error } = await supabase
+      .from("documents")
+      .select("id, file_url, thumbnail_url, tax_period_month, tax_period_year, issue_date, created_at")
+      .eq("client_id", data.clientId)
+      .eq("source", "email");
+
+    if (error) throw new Error(error.message);
+
+    const docsToDelete = (docs || []).filter((doc) => {
+      const month = doc.tax_period_month || new Date(doc.issue_date || doc.created_at).getMonth() + 1;
+      const year = doc.tax_period_year || new Date(doc.issue_date || doc.created_at).getFullYear();
+      return month === data.month && year === data.year;
+    });
+
+    if (docsToDelete.length === 0) return { success: true, deleted: 0 };
+
+    const storagePaths = docsToDelete
+      .flatMap((doc) => [getDocumentsStoragePath(doc.file_url), getDocumentsStoragePath(doc.thumbnail_url)])
+      .filter(Boolean) as string[];
+
+    if (storagePaths.length > 0) {
+      try {
+        await supabaseAdmin.storage.from("documents").remove(storagePaths);
+      } catch {
+        // keep going even if storage cleanup fails
+      }
+    }
+
+    const { error: deleteError } = await supabase
+      .from("documents")
+      .delete()
+      .in("id", docsToDelete.map((doc) => doc.id));
+
+    if (deleteError) throw new Error(deleteError.message);
+    return { success: true, deleted: docsToDelete.length };
   });
 
 // Disconnect email integration
