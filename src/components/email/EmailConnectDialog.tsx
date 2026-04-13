@@ -28,12 +28,17 @@ const PROVIDER_INFO: Record<Provider, { label: string; icon: string }> = {
   imap: { label: "Iný e-mail (IMAP)", icon: "✉️" },
 };
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export function EmailConnectDialog({ open, onOpenChange, clientId, existingEmails = [] }: EmailConnectDialogProps) {
   const [email, setEmail] = useState("");
   const [detectedProvider, setDetectedProvider] = useState<Provider | null>(null);
   const [detecting, setDetecting] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [detected, setDetected] = useState(false);
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const hasValidEmail = EMAIL_PATTERN.test(email.trim());
 
   useEffect(() => {
     if (!open) {
@@ -45,12 +50,12 @@ export function EmailConnectDialog({ open, onOpenChange, clientId, existingEmail
   }, [open]);
 
   const handleDetect = useCallback(async () => {
-    if (!email.includes("@") || email.split("@")[1]?.length < 3) return;
+    if (!hasValidEmail) return;
 
     setDetecting(true);
     setDetected(false);
     try {
-      const result = await detectEmailProvider({ data: { email } });
+      const result = await detectEmailProvider({ data: { email: normalizedEmail } });
       setDetectedProvider(result.provider);
       setDetected(true);
     } catch {
@@ -59,23 +64,23 @@ export function EmailConnectDialog({ open, onOpenChange, clientId, existingEmail
     } finally {
       setDetecting(false);
     }
-  }, [email]);
+  }, [hasValidEmail, normalizedEmail]);
 
-  // Auto-detect when email looks complete (debounced)
   useEffect(() => {
-    if (!email.includes("@") || email.split("@")[1]?.length < 3) {
+    if (!hasValidEmail) {
       setDetected(false);
       setDetectedProvider(null);
       return;
     }
+
     const timer = setTimeout(handleDetect, 600);
     return () => clearTimeout(timer);
-  }, [email, handleDetect]);
+  }, [hasValidEmail, handleDetect]);
 
   const handleConnect = async () => {
-    if (!detectedProvider) return;
+    if (!detectedProvider || !hasValidEmail) return;
 
-    if (existingEmails.includes(email.toLowerCase())) {
+    if (existingEmails.includes(normalizedEmail)) {
       toast.error("Tento email je už pripojený");
       return;
     }
@@ -83,7 +88,7 @@ export function EmailConnectDialog({ open, onOpenChange, clientId, existingEmail
     setConnecting(true);
     try {
       const result = await getNylasConnectUrl({
-        data: { clientId, provider: detectedProvider, loginHint: email || undefined },
+        data: { clientId, provider: detectedProvider, loginHint: normalizedEmail || undefined },
       });
       if (result?.url) {
         window.open(result.url, "_blank", "noopener");
@@ -147,7 +152,7 @@ export function EmailConnectDialog({ open, onOpenChange, clientId, existingEmail
           <Button
             className="w-full"
             onClick={handleConnect}
-            disabled={!detected || !detectedProvider || !email.includes("@") || connecting}
+            disabled={!detected || !detectedProvider || !hasValidEmail || connecting}
           >
             {connecting ? (
               <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Pripájam...</>
