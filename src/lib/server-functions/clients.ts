@@ -23,6 +23,7 @@ function getDocumentsStoragePath(url?: string | null) {
 async function attachSignedPreviewUrls(documents: DocumentWithPreview[]) {
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  console.log("[attachSignedPreviewUrls] docs:", documents.length, "envAvailable:", !!supabaseUrl, !!serviceRoleKey);
   if (!supabaseUrl || !serviceRoleKey) return documents;
 
   const supabaseAdmin = createSupabaseClient(supabaseUrl, serviceRoleKey, {
