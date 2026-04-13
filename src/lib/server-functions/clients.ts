@@ -38,7 +38,10 @@ async function attachSignedPreviewUrls(documents: DocumentWithPreview[]) {
         const storagePath = getDocumentsStoragePath(originalUrl);
         if (!storagePath) continue;
 
-        const { data } = await supabaseAdmin.storage.from("documents").createSignedUrl(storagePath, 60 * 60);
+        const { data, error } = await supabaseAdmin.storage.from("documents").createSignedUrl(storagePath, 60 * 60);
+        if (error) {
+          console.error("Signed URL error:", error.message, "path:", storagePath, "url:", supabaseUrl);
+        }
         if (!data?.signedUrl) continue;
 
         if (originalUrl === doc.file_url) nextDoc.file_url = data.signedUrl;
