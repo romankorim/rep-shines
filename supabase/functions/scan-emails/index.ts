@@ -20,6 +20,96 @@ function normalizeMimeType(contentType?: string | null) {
   return contentType?.split(";")[0]?.trim().toLowerCase() || "application/octet-stream";
 }
 
+function arrayBufferToBase64(buffer: ArrayBuffer) {
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+async function classifyAttachmentByContent(
+  attachment: { filename: string; content_type: string; size: number; bytes: Uint8Array },
+  emailSubject: string,
+  emailFrom: string,
+  lovableApiKey: string,
+): Promise<{ relevant: boolean; reason: string; signal: "visual" | "metadata" | "fallback" }> {
+  const normalizedMimeType = normalizeMimeType(attachment.content_type);
+  const canInspectVisually = normalizedMimeType === "application/pdf" || normalizedMimeType.startsWith("image/");
+
+  if (!canInspectVisually) {
+    const metaResult = await classifyAttachmentWithAI(attachment, emailSubject, emailFrom, lovableApiKey);
+    return { ...metaResult, signal: "metadata" };
+  }
+
+  const filePart = normalizedMimeType === "application/pdf"
+    ? { type: "input_file", file_url: `data:application/pdf;base64,${arrayBufferToBase64(attachment.bytes.buffer)}` }
+    : { type: "image_url", image_url: { url: `data:${normalizedMimeType};base64,${arrayBufferToBase64(attachment.bytes.buffer)}` } };
+
+  const prompt = `Si spoľahlivý AI agent účtovníckej firmy. Tvoj cieľ je prísne odfiltrovať nerelevantné obrázky a ponechať len skutočné účtovné doklady.
+
+Kontext e-mailu:
+- Predmet: "${emailSubject || "(žiadny)"}"
+- Odosielateľ: "${emailFrom || "(neznámy)"}"
+- Súbor: "${attachment.filename || "(bez názvu)"}"
+- Typ: "${normalizedMimeType}"
+
+Najprv si vizuálne prezri obsah prílohy. Rozhodnutie rob podľa SKUTOČNÉHO OBSAHU dokumentu, nie podľa názvu súboru.
+
+Za relevantný účtovný doklad považuj len dokument, ktorý reálne obsahuje fakturačné / účtovné údaje ako napríklad:
+- dodávateľ / odberateľ / partner
+- IČO / DIČ / IČ DPH
+- číslo faktúry alebo variabilný symbol
+- dátum vystavenia / dodania / splatnosti
+- sumy, DPH, mena
+- položky, rozpis, pokladničný blok, bankový výpis
+
+Označ ako relevant=false ak je to:
+- screenshot administrácie, nastavení, dashboardu, reklamy alebo webu
+- screenshot Facebook/Meta/Business Manager, reklamných nástrojov, analytiky, správ účtov
+- obrázok bez účtovných polí
+- ilustrácia, logo, podpis, fotka obrazovky bez fakturačných údajov
+
+Ak na obrázku nie sú jasne viditeľné účtovné polia alebo finančné údaje, výsledok musí byť relevant=false.
+
+Vráť IBA JSON:
+{"relevant": true/false, "reason": "stručné vysvetlenie", "document_hint": "invoice|receipt|statement|other|none"}`;
+
+  try {
+    const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${lovableApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-pro",
+        messages: [{ role: "user", content: [{ type: "text", text: prompt }, filePart] }],
+        response_format: { type: "json_object" },
+      }),
+    });
+
+    if (!resp.ok) {
+      const metaResult = await classifyAttachmentWithAI(attachment, emailSubject, emailFrom, lovableApiKey);
+      return { ...metaResult, signal: "fallback" };
+    }
+
+    const result = await resp.json();
+    const content = result.choices?.[0]?.message?.content;
+    const parsed = JSON.parse(content || "{}");
+    return {
+      relevant: Boolean(parsed.relevant),
+      reason: parsed.reason || "visual-classification",
+      signal: "visual",
+    };
+  } catch {
+    const metaResult = await classifyAttachmentWithAI(attachment, emailSubject, emailFrom, lovableApiKey);
+    return { ...metaResult, signal: "fallback" };
+  }
+}
+
 /**
  * Uses AI to classify whether an email attachment is likely an accounting document.
  * Returns { relevant: boolean, reason: string }
@@ -193,7 +283,7 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { grantId, clientId, officeId, messageId } = await req.json();
+    const { grantId, clientId, officeId, messageId, month, year } = await req.json();
     if (!grantId || !clientId || !officeId) {
       return new Response(JSON.stringify({ error: "Missing required fields" }), {
         status: 400,
@@ -218,24 +308,40 @@ serve(async (req) => {
         messagesToProcess = [msgData.data];
       }
     } else {
-      const params = new URLSearchParams({
-        has_attachment: "true",
-        limit: "50",
-        fields: "id,subject,from,date,attachments",
-      });
+      let nextCursor: string | null = null;
 
-      const listResp = await fetch(`${NYLAS_API}/grants/${grantId}/messages?${params}`, {
-        headers: { Authorization: `Bearer ${nylasApiKey}`, Accept: "application/json" },
-      });
+      do {
+        const params = new URLSearchParams({
+          has_attachment: "true",
+          limit: "50",
+          fields: "id,subject,from,date,attachments",
+        });
 
-      if (!listResp.ok) {
-        const errText = await listResp.text();
-        console.error("Nylas list messages failed:", listResp.status, errText);
-        throw new Error(`Nylas API error: ${listResp.status}`);
-      }
+        if (month && year) {
+          const receivedAfter = Math.floor(Date.UTC(year, month - 1, 1, 0, 0, 0) / 1000);
+          const receivedBefore = Math.floor(Date.UTC(year, month, 1, 0, 0, 0) / 1000);
+          params.set("received_after", String(receivedAfter));
+          params.set("received_before", String(receivedBefore));
+        }
 
-      const listData = await listResp.json();
-      messagesToProcess = listData.data || [];
+        if (nextCursor) {
+          params.set("page_token", nextCursor);
+        }
+
+        const listResp = await fetch(`${NYLAS_API}/grants/${grantId}/messages?${params}`, {
+          headers: { Authorization: `Bearer ${nylasApiKey}`, Accept: "application/json" },
+        });
+
+        if (!listResp.ok) {
+          const errText = await listResp.text();
+          console.error("Nylas list messages failed:", listResp.status, errText);
+          throw new Error(`Nylas API error: ${listResp.status}`);
+        }
+
+        const listData = await listResp.json();
+        messagesToProcess.push(...(listData.data || []));
+        nextCursor = listData.next_cursor || null;
+      } while (nextCursor);
     }
 
     console.log(`Processing ${messagesToProcess.length} messages for client ${clientId}`);
@@ -302,8 +408,6 @@ serve(async (req) => {
           continue;
         }
 
-        console.log(`AI accepted: ${att.filename} — ${classification.reason}`);
-
         // Check for duplicates; on refresh retry failed extractions
         const sourceEmailId = `nylas:${msg.id}:${att.id}`;
         const { data: existing } = await supabase
@@ -328,6 +432,61 @@ serve(async (req) => {
               if (!retryResp.ok) console.error("Retry extraction failed:", existingDoc.id, retryResp.status, await retryResp.text());
               processedCount++;
             }
+          } else if (["pending_approval", "approved", "rejected"].includes(existingDoc.status)) {
+            const normalizedMimeType = normalizeMimeType(att.content_type);
+            const canInspectVisually = normalizedMimeType === "application/pdf" || normalizedMimeType.startsWith("image/");
+
+            if (canInspectVisually) {
+              const dlResp = await fetch(
+                `${NYLAS_API}/grants/${grantId}/attachments/${att.id}/download?message_id=${msg.id}`,
+                { headers: { Authorization: `Bearer ${nylasApiKey}` } },
+              );
+
+              if (dlResp.ok) {
+                const fileBuffer = await dlResp.arrayBuffer();
+                const fileBytes = new Uint8Array(fileBuffer);
+                const review = await classifyAttachmentByContent(
+                  {
+                    filename: att.filename || "",
+                    content_type: normalizedMimeType,
+                    size: att.size || fileBytes.length,
+                    bytes: fileBytes,
+                  },
+                  emailSubject,
+                  emailFrom,
+                  lovableApiKey,
+                );
+
+                if (!review.relevant) {
+                  await supabase
+                    .from("documents")
+                    .update({
+                      status: "rejected",
+                      document_type: null,
+                      supplier_name: null,
+                      supplier_ico: null,
+                      supplier_dic: null,
+                      supplier_ic_dph: null,
+                      document_number: null,
+                      variable_symbol: null,
+                      issue_date: null,
+                      due_date: null,
+                      delivery_date: null,
+                      total_amount: null,
+                      currency: null,
+                      tax_base: null,
+                      vat_amount: null,
+                      vat_rate: null,
+                      vat_breakdown: null,
+                      expense_category: null,
+                      ai_confidence: 0,
+                      ai_raw_data: { reason: review.reason, filtered_by_agent: true },
+                    })
+                    .eq("id", existingDoc.id);
+                  skippedCount++;
+                }
+              }
+            }
           }
           continue;
         }
@@ -349,6 +508,26 @@ serve(async (req) => {
         const ext = filename.split(".").pop() || "pdf";
         const storagePath = `${clientId}/${Date.now()}_email_${Math.random().toString(36).slice(2)}.${ext}`;
         const normalizedMimeType = normalizeMimeType(att.content_type);
+
+        const visualClassification = await classifyAttachmentByContent(
+          {
+            filename,
+            content_type: normalizedMimeType,
+            size: att.size || fileBytes.length,
+            bytes: fileBytes,
+          },
+          emailSubject,
+          emailFrom,
+          lovableApiKey,
+        );
+
+        if (!visualClassification.relevant) {
+          console.log(`AI skip after visual inspection: ${filename} — ${visualClassification.reason}`);
+          skippedCount++;
+          continue;
+        }
+
+        console.log(`AI accepted: ${filename} — ${visualClassification.reason} (${visualClassification.signal})`);
 
         const { error: uploadError } = await supabase.storage
           .from("documents")

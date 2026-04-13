@@ -50,6 +50,8 @@ const docTypeOptions = [
   { value: "other", label: "Iné" },
 ];
 
+const docTypeLabelMap = Object.fromEntries(docTypeOptions.map((option) => [option.value, option.label]));
+
 function EditableField({ label, value, editing, onChange, type = "text" }: {
   label: string; value: string; editing: boolean; onChange: (v: string) => void; type?: string;
 }) {
@@ -186,9 +188,15 @@ export function DocumentViewer({ document: doc, open, onOpenChange }: DocumentVi
         <div className="flex h-full">
           <div className="flex-[3] bg-muted/20 flex flex-col border-r border-border">
             <div className="flex items-center justify-between p-3 border-b border-border">
-              <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-medium rounded-none ${status.class}`}>
-                {status.label}
-              </span>
+              <div className="flex flex-col gap-1">
+                <span className={`inline-flex w-fit items-center px-2 py-0.5 text-[10px] font-medium rounded-none ${status.class}`}>
+                  {status.label}
+                </span>
+                <div className="space-y-0.5">
+                  <p className="text-xs font-semibold">{docTypeLabelMap[documentType] || "Nezaradený doklad"}</p>
+                  <p className="text-[11px] text-muted-foreground">{supplierName || doc.clients?.company_name || doc.clients?.name || "Partner neextrahovaný"}</p>
+                </div>
+              </div>
               <button onClick={() => onOpenChange(false)} className="p-1 hover:bg-muted rounded-none">
                 <X className="h-4 w-4" />
               </button>
@@ -251,6 +259,24 @@ export function DocumentViewer({ document: doc, open, onOpenChange }: DocumentVi
 
               <div className="flex-1 overflow-y-auto">
                 <TabsContent value="details" className="p-4 space-y-4 mt-0">
+                  <div className="grid grid-cols-2 gap-3 border border-border bg-muted/20 p-3">
+                    <div>
+                      <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Partner</Label>
+                      <p className="text-xs mt-0.5 font-medium">{supplierName || doc.clients?.company_name || doc.clients?.name || "—"}</p>
+                    </div>
+                    <div>
+                      <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Extrahovaný typ</Label>
+                      <p className="text-xs mt-0.5 font-medium">{docTypeLabelMap[documentType] || "—"}</p>
+                    </div>
+                    <div>
+                      <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">AI dôvera</Label>
+                      <p className="text-xs mt-0.5 font-medium">{doc.ai_confidence != null ? `${doc.ai_confidence}%` : "—"}</p>
+                    </div>
+                    <div>
+                      <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Zdroj súboru</Label>
+                      <p className="text-xs mt-0.5 font-medium truncate">{doc.file_name || "—"}</p>
+                    </div>
+                  </div>
                   {!hasExtractedData && doc.status === "error" && (
                     <div className="border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
                       AI extrakcia tohto PDF zlyhala, ale doklad už sa dá otvoriť a polia môžete upraviť ručne.
