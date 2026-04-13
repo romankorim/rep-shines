@@ -318,13 +318,30 @@ serve(async (req) => {
         const sourceEmailId = `nylas:${msg.id}:${att.id}`;
         const { data: existing } = await supabase
           .from("documents")
-          .select("id, status")
+          .select("id, status, document_type, supplier_name, total_amount, issue_date, ai_confidence")
           .eq("source_email_id", sourceEmailId)
           .limit(1);
 
         if (existing && existing.length > 0) {
           const existingDoc = existing[0];
+          const shouldRefreshExisting =
+            existingDoc.status === "error" ||
+            existingDoc.status === "processing" ||
+            existingDoc.status === "rejected" ||
+            (existingDoc.status !== "approved" && (
+              !existingDoc.document_type ||
+              !existingDoc.supplier_name ||
+              existingDoc.total_amount == null ||
+              !existingDoc.issue_date ||
+              (existingDoc.ai_confidence ?? 0) < 70
+            ));
+
           if (!visualClassification.relevant) {
+            if (existingDoc.status === "approved") {
+              console.log(`AI kept approved doc unchanged: ${filename}`);
+              continue;
+            }
+
             console.log(`AI skip existing: ${filename} — ${visualClassification.reason}`);
             await supabase
               .from("documents")
@@ -355,7 +372,7 @@ serve(async (req) => {
             continue;
           }
 
-          if (existingDoc.status === "error") {
+          if (shouldRefreshExisting) {
             const anonKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY");
             if (anonKey) {
               const retryResp = await fetch(`${supabaseUrl}/functions/v1/extract-document`, {
@@ -366,10 +383,15 @@ serve(async (req) => {
                 },
                 body: JSON.stringify({ documentId: existingDoc.id }),
               });
-              if (!retryResp.ok) console.error("Retry extraction failed:", existingDoc.id, retryResp.status, await retryResp.text());
-              processedCount++;
+              if (!retryResp.ok) {
+                console.error("Retry extraction failed:", existingDoc.id, retryResp.status, await retryResp.text());
+              } else {
+                processedCount++;
+              }
             }
+            console.log(`AI refreshed existing: ${filename}`);
           }
+
           continue;
         }
 
