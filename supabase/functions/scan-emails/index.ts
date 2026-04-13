@@ -178,12 +178,39 @@ Pravidlá:
   }
 }
 
+async function triggerDocumentExtraction(documentId: string, supabaseUrl: string, waitForCompletion = false): Promise<boolean> {
+  const anonKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY");
+  if (!anonKey) return !waitForCompletion;
+
+  if (!waitForCompletion) {
+    fetch(`${supabaseUrl}/functions/v1/extract-document`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${anonKey}` },
+      body: JSON.stringify({ documentId }),
+    }).catch((e) => console.error("Extract trigger failed:", e));
+    return true;
+  }
+
+  const extractResp = await fetch(`${supabaseUrl}/functions/v1/extract-document`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${anonKey}` },
+    body: JSON.stringify({ documentId }),
+  });
+
+  if (!extractResp.ok) {
+    console.error("Extract sync failed:", extractResp.status, await extractResp.text());
+    return false;
+  }
+
+  return true;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   const startTime = Date.now();
 
   try {
-    const { grantId, clientId, officeId, messageId, month, year } = await req.json();
+    const { grantId, clientId, officeId, messageId, month, year, forceReextract } = await req.json();
     if (!grantId || !clientId || !officeId) {
       return new Response(JSON.stringify({ error: "Missing required fields" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -310,6 +337,7 @@ serve(async (req) => {
       if (existing && existing.length > 0) {
         const existingDoc = existing[0];
         const shouldRefresh =
+          forceReextract ||
           existingDoc.status === "error" ||
           existingDoc.status === "processing" ||
           existingDoc.status === "rejected" ||
@@ -322,15 +350,9 @@ serve(async (req) => {
           ));
 
         if (shouldRefresh) {
-          const anonKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY");
-          if (anonKey) {
-            const retryResp = await fetch(`${supabaseUrl}/functions/v1/extract-document`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", Authorization: `Bearer ${anonKey}` },
-              body: JSON.stringify({ documentId: existingDoc.id }),
-            });
-            if (retryResp.ok) return "processed";
-          }
+          const extractionTriggered = await triggerDocumentExtraction(existingDoc.id, supabaseUrl, Boolean(forceReextract));
+          if (extractionTriggered) return "processed";
+          if (forceReextract) return "skipped";
         }
         return "exists";
       }
@@ -383,13 +405,9 @@ serve(async (req) => {
       if (insertError) { console.error("Insert failed:", insertError); return "skipped"; }
 
       if (doc) {
-        const anonKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY");
-        if (anonKey) {
-          fetch(`${supabaseUrl}/functions/v1/extract-document`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${anonKey}` },
-            body: JSON.stringify({ documentId: doc.id }),
-          }).catch(e => console.error("Extract trigger failed:", e));
+        const extractionTriggered = await triggerDocumentExtraction(doc.id, supabaseUrl, Boolean(forceReextract));
+        if (forceReextract && !extractionTriggered) {
+          return "skipped";
         }
       }
 

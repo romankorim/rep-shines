@@ -246,7 +246,12 @@ export const exchangeNylasCode = createServerFn({ method: "POST" })
 // Trigger manual email scan for a specific client
 export const triggerEmailScan = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({ clientId: z.string().uuid(), month: z.number().min(1).max(12).optional(), year: z.number().min(2000).max(2100).optional() }))
+  .inputValidator(z.object({
+    clientId: z.string().uuid(),
+    month: z.number().min(1).max(12).optional(),
+    year: z.number().min(2000).max(2100).optional(),
+    forceReextract: z.boolean().optional(),
+  }))
   .handler(async ({ data, context }) => {
     const { supabase } = context;
 
@@ -278,6 +283,7 @@ export const triggerEmailScan = createServerFn({ method: "POST" })
         officeId: integration.office_id,
         month: data.month,
         year: data.year,
+        forceReextract: data.forceReextract ?? false,
       }),
     });
 
