@@ -68,15 +68,18 @@ function ClientDetailPage() {
   useEffect(() => {
     if (nylas_code && !exchangingCode) {
       setExchangingCode(true);
+      console.log("[Nylas] Starting code exchange, code length:", nylas_code.length);
       exchangeNylasCode({ data: { code: nylas_code, clientId } })
-        .then(() => {
+        .then((result) => {
+          console.log("[Nylas] Exchange success:", result);
           queryClient.invalidateQueries({ queryKey: ["client", clientId] });
           window.history.replaceState({}, "", `/clients/${clientId}`);
-          toast.success("E-mailový účet úspešne pripojený");
+          toast.success(`E-mailový účet ${result?.email || ""} úspešne pripojený`);
         })
         .catch((err) => {
-          console.error("Nylas exchange failed:", err);
-          toast.error("Nepodarilo sa pripojiť e-mail");
+          console.error("[Nylas] Exchange failed:", err);
+          toast.error(err?.message || "Nepodarilo sa pripojiť e-mail");
+          window.history.replaceState({}, "", `/clients/${clientId}`);
         })
         .finally(() => setExchangingCode(false));
     }
