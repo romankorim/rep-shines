@@ -78,9 +78,10 @@ function ClientDetailPage() {
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const queryClient = useQueryClient();
 
-  const now = new Date();
-  const [viewYear, setViewYear] = useState(now.getFullYear());
-  const [viewMonth, setViewMonth] = useState(now.getMonth() + 1);
+  // Default to previous month (the month being closed/processed)
+  const defaultDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const [viewYear, setViewYear] = useState(defaultDate.getFullYear());
+  const [viewMonth, setViewMonth] = useState(defaultDate.getMonth() + 1);
   const [initialPeriodSet, setInitialPeriodSet] = useState(false);
 
   // Handle Nylas OAuth callback
