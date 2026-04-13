@@ -1,6 +1,51 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
+import dns from "node:dns";
+
+// Detect email provider via MX records (server-side DNS lookup)
+export const detectEmailProvider = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({ email: z.string().email() }))
+  .handler(async ({ data }) => {
+    const domain = data.email.split("@")[1]?.toLowerCase();
+    if (!domain) return { provider: "imap" as const };
+
+    // Quick domain check first
+    const knownGoogle = ["gmail.com", "googlemail.com"];
+    const knownMicrosoft = ["outlook.com", "hotmail.com", "live.com", "msn.com", "outlook.sk", "outlook.cz"];
+
+    if (knownGoogle.includes(domain)) return { provider: "google" as const, confidence: "domain" };
+    if (knownMicrosoft.includes(domain) || domain.endsWith(".onmicrosoft.com")) return { provider: "microsoft" as const, confidence: "domain" };
+
+    // For custom domains, check MX records
+    try {
+      const mxRecords = await new Promise<dns.MxRecord[]>((resolve, reject) => {
+        dns.resolveMx(domain, (err, addresses) => {
+          if (err) reject(err);
+          else resolve(addresses || []);
+        });
+      });
+
+      const mxHosts = mxRecords.map(r => r.exchange.toLowerCase());
+      const mxString = mxHosts.join(" ");
+
+      // Google Workspace MX records contain google.com or googlemail.com
+      if (mxString.includes("google.com") || mxString.includes("googlemail.com") || mxString.includes("smtp.google.com")) {
+        return { provider: "google" as const, confidence: "mx" };
+      }
+
+      // Microsoft 365 MX records contain outlook.com or protection.outlook.com
+      if (mxString.includes("outlook.com") || mxString.includes("protection.outlook.com") || mxString.includes("mail.protection.outlook")) {
+        return { provider: "microsoft" as const, confidence: "mx" };
+      }
+
+      return { provider: "imap" as const, confidence: "mx" };
+    } catch {
+      // DNS lookup failed, fallback to IMAP
+      return { provider: "imap" as const, confidence: "fallback" };
+    }
+  });
 
 // Generate Nylas OAuth connect URL for a client
 export const getNylasConnectUrl = createServerFn({ method: "POST" })
