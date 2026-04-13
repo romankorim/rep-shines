@@ -280,17 +280,21 @@ function ClientDetailPage() {
                             variant="ghost"
                             className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
                             title="Synchronizovať e-maily"
+                            disabled={scanning}
                             onClick={async () => {
+                              setScanning(true);
                               try {
                                 const result = await triggerEmailScan({ data: { clientId } });
                                 queryClient.invalidateQueries({ queryKey: ["client", clientId] });
                                 toast.success(`Synchronizácia dokončená (${result.processed} dokladov)`);
                               } catch {
                                 toast.error("Nepodarilo sa synchronizovať e-maily");
+                              } finally {
+                                setScanning(false);
                               }
                             }}
                           >
-                            <RefreshCw className="h-3 w-3" />
+                            <RefreshCw className={`h-3 w-3 ${scanning ? "animate-spin" : ""}`} />
                           </Button>
                           <Button
                             size="icon"
