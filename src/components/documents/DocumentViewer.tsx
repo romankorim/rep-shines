@@ -40,6 +40,16 @@ const expenseCategories = [
   "materiál", "služby", "cestovné", "telefón", "internet", "nájom", "poistenie", "ostatné",
 ];
 
+const docTypeOptions = [
+  { value: "received_invoice", label: "Prijatá faktúra" },
+  { value: "issued_invoice", label: "Vydaná faktúra" },
+  { value: "receipt", label: "Účtenka" },
+  { value: "credit_note", label: "Dobropis" },
+  { value: "advance_invoice", label: "Zálohová faktúra" },
+  { value: "bank_statement", label: "Bankový výpis" },
+  { value: "other", label: "Iné" },
+];
+
 function EditableField({ label, value, editing, onChange, type = "text" }: {
   label: string; value: string; editing: boolean; onChange: (v: string) => void; type?: string;
 }) {

@@ -61,6 +61,7 @@ export const updateDocumentFields = createServerFn({ method: "POST" })
   .inputValidator(
     z.object({
       documentId: z.string().uuid(),
+      documentType: z.enum(["received_invoice", "issued_invoice", "receipt", "credit_note", "advance_invoice", "bank_statement", "other"]).optional(),
       supplierName: z.string().max(500).optional(),
       supplierIco: z.string().max(50).optional(),
       supplierDic: z.string().max(50).optional(),
@@ -81,6 +82,7 @@ export const updateDocumentFields = createServerFn({ method: "POST" })
     const { supabase } = context;
 
     const fieldMap: Record<string, string> = {
+      documentType: "document_type",
       supplierName: "supplier_name",
       supplierIco: "supplier_ico",
       supplierDic: "supplier_dic",
