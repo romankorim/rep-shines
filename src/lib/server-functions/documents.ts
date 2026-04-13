@@ -168,3 +168,27 @@ export const createDocumentRecord = createServerFn({ method: "POST" })
 
     return doc;
   });
+
+// Move document to a different tax period (month/year)
+export const moveDocumentPeriod = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(
+    z.object({
+      documentId: z.string().uuid(),
+      targetMonth: z.number().min(1).max(12),
+      targetYear: z.number().min(2000).max(2100),
+    })
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const { error } = await supabase
+      .from("documents")
+      .update({
+        tax_period_month: data.targetMonth,
+        tax_period_year: data.targetYear,
+      })
+      .eq("id", data.documentId);
+
+    if (error) throw new Error(error.message);
+    return { success: true };
+  });
