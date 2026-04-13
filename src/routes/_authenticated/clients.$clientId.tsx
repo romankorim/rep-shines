@@ -415,14 +415,16 @@ function ClientDetailPage() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
                 {currentPeriodDocs.map((doc: any) => {
                   const status = statusConfig[doc.status] || { label: doc.status, class: "bg-muted text-muted-foreground" };
+                  const isImage = doc.file_type?.startsWith("image/");
+                  const isPdf = doc.file_type?.includes("pdf");
                   return (
                     <Card
                       key={doc.id}
                       draggable
-                      className="cursor-grab active:cursor-grabbing hover:shadow-md transition-all"
+                      className="cursor-grab active:cursor-grabbing hover:shadow-md transition-all overflow-hidden"
                       onDragStart={(e) => {
                         e.dataTransfer.setData("text/plain", doc.id);
                         setDraggedDocId(doc.id);
@@ -430,21 +432,34 @@ function ClientDetailPage() {
                       onDragEnd={() => setDraggedDocId(null)}
                       onClick={() => setSelectedDoc(doc)}
                     >
-                      <CardContent className="p-3">
-                        <div className="flex items-start justify-between mb-2">
-                          <div className="flex items-center gap-1">
-                            <GripVertical className="h-3 w-3 text-muted-foreground" />
-                            <span className={`inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium rounded-none ${status.class}`}>
-                              {status.label}
-                            </span>
+                      {/* Thumbnail */}
+                      <div className="aspect-[4/3] bg-muted/30 flex items-center justify-center overflow-hidden border-b border-border">
+                        {doc.file_url && isImage ? (
+                          <img src={doc.file_url} alt={doc.file_name || "Document"} className="w-full h-full object-cover" />
+                        ) : doc.file_url && isPdf ? (
+                          <div className="w-full h-full flex flex-col items-center justify-center bg-destructive/5">
+                            <FileText className="h-8 w-8 text-destructive/60" />
+                            <span className="text-[9px] text-muted-foreground mt-1 uppercase font-medium">PDF</span>
                           </div>
-                          {doc.source === "email" && (
-                            <Mail className="h-3 w-3 text-muted-foreground" />
-                          )}
+                        ) : (
+                          <div className="w-full h-full flex flex-col items-center justify-center">
+                            <FileText className="h-8 w-8 text-muted-foreground/40" />
+                          </div>
+                        )}
+                      </div>
+                      <CardContent className="p-2.5">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className={`inline-flex items-center px-1.5 py-0.5 text-[8px] font-medium rounded-none ${status.class}`}>
+                            {status.label}
+                          </span>
+                          <div className="flex items-center gap-1">
+                            {doc.source === "email" && <Mail className="h-2.5 w-2.5 text-muted-foreground" />}
+                            <GripVertical className="h-2.5 w-2.5 text-muted-foreground" />
+                          </div>
                         </div>
-                        <p className="text-sm font-medium truncate">{doc.supplier_name || doc.file_name || "Neznámy"}</p>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {doc.total_amount ? `${Number(doc.total_amount).toLocaleString("sk-SK")} €` : "Suma neextrahovaná"}
+                        <p className="text-xs font-medium truncate">{doc.supplier_name || doc.file_name || "Neznámy"}</p>
+                        <p className="text-[10px] text-muted-foreground mt-0.5">
+                          {doc.total_amount ? `${Number(doc.total_amount).toLocaleString("sk-SK")} €` : "—"}
                         </p>
                       </CardContent>
                     </Card>
