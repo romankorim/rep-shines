@@ -148,7 +148,11 @@ function ClientDetailPage() {
   // Remove invalid selections when documents change
   useEffect(() => {
     const validIds = new Set(documents.map((doc: any) => doc.id));
-    setSelectedDocumentIds((current) => current.filter((id) => validIds.has(id)));
+    setSelectedDocumentIds((current) => {
+      const next = current.filter((id) => validIds.has(id));
+      const unchanged = next.length === current.length && next.every((id, index) => id === current[index]);
+      return unchanged ? current : next;
+    });
   }, [documents]);
 
   const invalidateDocumentQueries = useCallback(async () => {
@@ -185,7 +189,7 @@ function ClientDetailPage() {
   const handleRefreshMonth = useCallback(async () => {
     setScanning(true);
     try {
-      const result = await triggerEmailScan({ data: { clientId, month: viewMonth, year: viewYear } });
+      const result = await triggerEmailScan({ data: { clientId, month: viewMonth, year: viewYear, forceReextract: true } });
       await invalidateDocumentQueries();
       toast.success(`Sync: ${result.processed} importovaných alebo aktualizovaných, ${result.skipped ?? 0} preskočených`);
     } catch (error) {
