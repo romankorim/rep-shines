@@ -1,5 +1,18 @@
+/**
+ * INTELLIGENT EMAIL AGENT — scan-emails v2
+ *
+ * 6-stage pipeline:
+ *   1. DISCOVERY  — smart Nylas queries (not just has_attachment)
+ *   2. RULES      — fast filter from sender_intelligence (free, <1ms)
+ *   3. TRIAGE     — batch AI classification (text-only, cheap)
+ *   4. EXTRACTION — multi-strategy (attachment, inline, body, link, forwarded)
+ *   5. DEDUP      — SHA-256 + semantic hash
+ *   6. LEARNING   — update sender_intelligence stats
+ */
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.100.1";
+import { crypto } from "https://deno.land/std@0.168.0/crypto/mod.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,144 +20,129 @@ const corsHeaders = {
 };
 
 const NYLAS_API = "https://api.us.nylas.com/v3";
-const MAX_WALL_TIME_MS = 140_000; // 140s hard limit (edge fn timeout is 150s)
-const AI_BATCH_SIZE = 5; // parallel AI classifications
+const MAX_WALL_TIME_MS = 135_000;
+const TRIAGE_BATCH_SIZE = 8;
 
-const ALWAYS_SKIP_CONTENT_TYPES = [
-  "application/zip", "application/x-zip",
-  "video/", "audio/",
-  "application/vnd.openxmlformats-officedocument.presentationml",
-  "application/vnd.ms-powerpoint",
+// ─── STAGE 1: DISCOVERY ─────────────────────────────────────
+// Smart queries that find emails WITH and WITHOUT attachments
+
+const DISCOVERY_QUERIES = [
+  // SK/CZ invoice subjects
+  'subject:(faktura OR faktúra OR invoice OR "daňový doklad")',
+  'subject:(dobropis OR "credit note" OR proforma OR záloha)',
+  // Receipts / confirmations
+  'subject:(účtenka OR receipt OR potvrdenie OR "potvrdenie platby" OR "payment confirmation")',
+  // Financial subjects
+  'subject:(platba OR payment OR vyúčtovanie OR avízo OR upomienka OR splatnosť)',
+  // PDF attachments (classic invoices)
+  "has:attachment filename:pdf",
+  // Known body-invoice senders (Uber, Bolt, etc. — no attachment!)
+  "from:uber.com OR from:bolt.eu OR from:wolt.com OR from:booking.com",
+  "from:apple.com OR from:google.com OR from:stripe.com OR from:amazon.com",
+  // Bank statements / notifications
+  'subject:(výpis OR "bank statement" OR výpis z účtu)',
 ];
 
-// Generic filenames that are almost always inline/marketing images
-const GENERIC_IMAGE_NAMES = [
-  "image.png", "image.jpg", "image.jpeg", "image.gif",
-  "image0.png", "image1.png", "image2.png", "image3.png", "image4.png",
-  "image0.jpg", "image1.jpg", "image2.jpg", "image3.jpg",
-  "download.png", "download.jpg",
-];
-
-function normalizeMimeType(contentType?: string | null) {
-  return contentType?.split(";")[0]?.trim().toLowerCase() || "application/octet-stream";
+function normalizeMimeType(ct?: string | null) {
+  return ct?.split(";")[0]?.trim().toLowerCase() || "application/octet-stream";
 }
 
-function arrayBufferToBase64(buffer: ArrayBuffer) {
-  let binary = "";
-  const bytes = new Uint8Array(buffer);
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+function arrayBufferToBase64(buf: ArrayBuffer) {
+  let bin = "";
+  const bytes = new Uint8Array(buf);
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
   }
-  return btoa(binary);
+  return btoa(bin);
 }
 
-async function classifyAttachmentByContent(
-  attachment: { filename: string; content_type: string; size: number; bytes: Uint8Array },
-  emailSubject: string,
-  emailFrom: string,
+async function sha256(data: Uint8Array): Promise<string> {
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// ─── STAGE 2: RULES ENGINE ──────────────────────────────────
+
+interface SenderRule {
+  classification: string;
+  typical_content: string | null;
+  force_include: boolean;
+  force_exclude: boolean;
+  known_vendor_name: string | null;
+}
+
+function applyRules(
+  fromEmail: string,
+  subject: string,
+  senderMap: Map<string, SenderRule>,
+  processedIds: Set<string>,
+  nylasMessageId: string,
+): "process" | "skip" | "trusted" {
+  // Already processed?
+  if (processedIds.has(nylasMessageId)) return "skip";
+
+  const domain = fromEmail.split("@")[1]?.toLowerCase() || "";
+  const rule = senderMap.get(domain) || senderMap.get(fromEmail.toLowerCase());
+
+  if (rule) {
+    if (rule.force_exclude) return "skip";
+    if (rule.force_include || rule.classification === "trusted_invoicer") return "trusted";
+    if (rule.classification === "newsletter" || rule.classification === "spam") return "skip";
+  }
+
+  // Heuristic: skip obvious non-accounting
+  const subjectLower = subject.toLowerCase();
+  if (subjectLower.includes("unsubscribe") || subjectLower.includes("odhlásiť")) return "skip";
+
+  return "process";
+}
+
+// ─── STAGE 3: AI TRIAGE ─────────────────────────────────────
+
+interface TriageResult {
+  is_accounting: boolean;
+  confidence: number;
+  content_types: string[]; // 'attachment','inline_image','body_invoice','download_link','forwarded'
+  reasoning: string;
+}
+
+async function triageBatch(
+  emails: Array<{ from: string; subject: string; snippet: string; attachments: string; is_forwarded: boolean }>,
   lovableApiKey: string,
-): Promise<{ relevant: boolean; reason: string; signal: "visual" | "metadata" | "fallback" }> {
-  const normalizedMimeType = normalizeMimeType(attachment.content_type);
-  const canInspectVisually = normalizedMimeType === "application/pdf" || normalizedMimeType.startsWith("image/");
+): Promise<TriageResult[]> {
+  const emailList = emails.map((e, i) => `
+[Email ${i + 1}]
+Od: ${e.from}
+Predmet: ${e.subject}
+Ukážka: ${e.snippet}
+Prílohy: ${e.attachments || "žiadne"}
+Preposlané: ${e.is_forwarded ? "áno" : "nie"}`).join("\n");
 
-  if (!canInspectVisually) {
-    const metaResult = await classifyAttachmentWithAI(attachment, emailSubject, emailFrom, lovableApiKey);
-    return { ...metaResult, signal: "metadata" };
-  }
+  const prompt = `Si AI agent účtovníckej firmy na Slovensku/v Česku. Pre KAŽDÝ email rozhodni, či obsahuje účtovný doklad.
 
-  const filePart = normalizedMimeType === "application/pdf"
-    ? { type: "input_file", file_url: `data:application/pdf;base64,${arrayBufferToBase64(attachment.bytes.buffer)}` }
-    : { type: "image_url", image_url: { url: `data:${normalizedMimeType};base64,${arrayBufferToBase64(attachment.bytes.buffer)}` } };
+${emailList}
 
-  const prompt = `Si spoľahlivý AI agent účtovníckej firmy. Tvoj cieľ je prísne odfiltrovať nerelevantné obrázky a ponechať len skutočné účtovné doklady.
+Pre KAŽDÝ email vráť:
+- is_accounting: true ak email obsahuje alebo JE faktúra, účtenka, dobropis, výpis, potvrdenie platby, objednávka, zmluva, alebo iný účtovný/finančný doklad
+- content_types: pole stratégií extrahovania:
+  "attachment" = doklad je v prílohe (PDF, obrázok)
+  "inline_image" = fotka dokladu vložená priamo v tele emailu
+  "body_invoice" = samotný email JE doklad (napr. Uber, Bolt, Booking, Apple, SaaS služby)
+  "download_link" = email obsahuje odkaz na stiahnutie faktúry
+  "forwarded" = preposlený email s dokladom
+- confidence: 0-100
+- reasoning: stručné vysvetlenie
 
-Kontext e-mailu:
-- Predmet: "${emailSubject || "(žiadny)"}"
-- Odosielateľ: "${emailFrom || "(neznámy)"}"
-- Súbor: "${attachment.filename || "(bez názvu)"}"
-- Typ: "${normalizedMimeType}"
+DÔLEŽITÉ:
+- Emaily od Uber, Bolt, Booking, Apple, Google, AWS, Stripe = VŽDY is_accounting=true, content_types=["body_invoice"]
+- PDF príloha s názvom obsahujúcim "faktura", "invoice", "doklad" = VŽDY relevant
+- Screenshot, logo, podpis, banner = NERELEVANTNÉ
+- Newsletter s prílohami = zvyčajne nerelevantné (ak predmet nenaznačuje faktúru)
+- Ak je email preposlanie faktúry = relevant, content_types=["forwarded"]
 
-Najprv si vizuálne prezri obsah prílohy. Rozhodnutie rob podľa SKUTOČNÉHO OBSAHU dokumentu, nie podľa názvu súboru.
-
-Za relevantný účtovný doklad považuj len dokument, ktorý reálne obsahuje fakturačné / účtovné údaje ako napríklad:
-- dodávateľ / odberateľ / partner
-- IČO / DIČ / IČ DPH
-- číslo faktúry alebo variabilný symbol
-- dátum vystavenia / dodania / splatnosti
-- sumy, DPH, mena
-- položky, rozpis, pokladničný blok, bankový výpis
-
-Označ ako relevant=false ak je to:
-- screenshot administrácie, nastavení, dashboardu, reklamy alebo webu
-- screenshot Facebook/Meta/Business Manager, reklamných nástrojov, analytiky, správ účtov
-- obrázok bez účtovných polí
-- ilustrácia, logo, podpis, fotka obrazovky bez fakturačných údajov
-
-Ak na obrázku nie sú jasne viditeľné účtovné polia alebo finančné údaje, výsledok musí byť relevant=false.
-
-Vráť IBA JSON:
-{"relevant": true/false, "reason": "stručné vysvetlenie", "document_hint": "invoice|receipt|statement|other|none"}`;
-
-  try {
-    const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${lovableApiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [{ role: "user", content: [{ type: "text", text: prompt }, filePart] }],
-        response_format: { type: "json_object" },
-      }),
-    });
-
-    if (!resp.ok) {
-      const metaResult = await classifyAttachmentWithAI(attachment, emailSubject, emailFrom, lovableApiKey);
-      return { ...metaResult, signal: "fallback" };
-    }
-
-    const result = await resp.json();
-    const content = result.choices?.[0]?.message?.content;
-    const parsed = JSON.parse(content || "{}");
-    return {
-      relevant: Boolean(parsed.relevant),
-      reason: parsed.reason || "visual-classification",
-      signal: "visual",
-    };
-  } catch {
-    const metaResult = await classifyAttachmentWithAI(attachment, emailSubject, emailFrom, lovableApiKey);
-    return { ...metaResult, signal: "fallback" };
-  }
-}
-
-async function classifyAttachmentWithAI(
-  attachment: { filename: string; content_type: string; size: number },
-  emailSubject: string,
-  emailFrom: string,
-  lovableApiKey: string,
-): Promise<{ relevant: boolean; reason: string }> {
-  const prompt = `Rozhodneš, či príloha e-mailu je účtovný doklad relevantný pre účtovníctvo (faktúra, účtenka, dobropis, výpis, zmluva, poistka, daňový doklad, mzdový doklad, avízo, upomienka, zálohová faktúra, proforma, dodací list, objednávka, potvrdenie platby, alebo iný finančný/účtovný dokument).
-
-E-mail:
-- Predmet: "${emailSubject || "(žiadny)"}"
-- Odosielateľ: "${emailFrom || "(neznámy)"}"
-
-Príloha:
-- Názov súboru: "${attachment.filename || "(bez názvu)"}"
-- Typ: "${attachment.content_type || "neznámy"}"
-- Veľkosť: ${attachment.size || 0} bytes
-
-Odpovedz IBA v JSON formáte:
-{"relevant": true/false, "reason": "stručné vysvetlenie prečo áno/nie"}
-
-Pravidlá:
-- PDF prílohy sú TAKMER VŽDY relevantné (faktúry, zmluvy, výpisy) — označ ako relevant=true pokiaľ nemáš silný dôvod prečo nie
-- Obrázky môžu byť fotky účteniek, dokladov — ak názov alebo kontext naznačuje účtovníctvo, označ relevant=true
-- Logá, podpisy, screenshoty, profilové obrázky, marketingové materiály → relevant=false
-- Ak si nie si istý, radšej označ relevant=true
-- Prezentácie (.pptx), videá, audio súbory → relevant=false`;
+Vráť VÝLUČNE JSON pole s ${emails.length} objektami:
+[{"is_accounting": true/false, "confidence": 85, "content_types": ["attachment"], "reasoning": "..."}]`;
 
   try {
     const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
@@ -157,60 +155,341 @@ Pravidlá:
         model: "google/gemini-2.5-flash-lite",
         messages: [{ role: "user", content: prompt }],
         response_format: { type: "json_object" },
+        temperature: 0.1,
       }),
     });
 
     if (!resp.ok) {
-      return { relevant: true, reason: "AI classification unavailable, accepting by default" };
+      console.error("Triage AI failed:", resp.status);
+      // Fallback: accept all as uncertain
+      return emails.map(() => ({
+        is_accounting: true,
+        confidence: 50,
+        content_types: ["attachment"],
+        reasoning: "AI triage unavailable, accepting by default",
+      }));
     }
 
     const result = await resp.json();
-    const content = result.choices?.[0]?.message?.content;
-    if (!content) {
-      return { relevant: true, reason: "Empty AI response, accepting by default" };
-    }
-
+    const content = result.choices?.[0]?.message?.content || "[]";
     const parsed = JSON.parse(content);
-    return { relevant: Boolean(parsed.relevant), reason: parsed.reason || "no reason given" };
+
+    // Handle both array and object-with-array responses
+    const arr = Array.isArray(parsed) ? parsed : parsed.emails || parsed.results || [parsed];
+
+    return arr.map((r: any, i: number) => ({
+      is_accounting: Boolean(r.is_accounting),
+      confidence: r.confidence ?? 50,
+      content_types: Array.isArray(r.content_types) ? r.content_types : ["attachment"],
+      reasoning: r.reasoning || "",
+    }));
   } catch (e) {
-    console.error("AI classify error:", e);
-    return { relevant: true, reason: "AI error, accepting by default" };
+    console.error("Triage error:", e);
+    return emails.map(() => ({
+      is_accounting: true, confidence: 50,
+      content_types: ["attachment"], reasoning: "triage error, accepting",
+    }));
   }
 }
 
-async function triggerDocumentExtraction(documentId: string, supabaseUrl: string, waitForCompletion = false): Promise<boolean> {
-  const anonKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY");
-  if (!anonKey) return !waitForCompletion;
+// ─── STAGE 4: MULTI-STRATEGY EXTRACTION ─────────────────────
 
-  if (!waitForCompletion) {
+async function extractAttachments(
+  msg: any, grantId: string, nylasApiKey: string,
+  clientId: string, officeId: string,
+  supabase: any, supabaseUrl: string, anonKey: string,
+  emailMsgId: string,
+): Promise<number> {
+  let count = 0;
+  if (!msg.attachments?.length) return 0;
+
+  for (const att of msg.attachments) {
+    const ct = normalizeMimeType(att.content_type);
+    const filename = att.filename || "";
+
+    // Skip inline, tiny, non-document files
+    if (att.content_disposition === "inline" && !ct.startsWith("image/")) continue;
+    if (att.size && att.size < 3000) continue;
+    if (ct.includes("video/") || ct.includes("audio/")) continue;
+
+    // Accept: PDF, images, Excel, Word
+    const isRelevantType = ct === "application/pdf"
+      || ct.startsWith("image/")
+      || ct.includes("spreadsheet") || ct.includes("excel")
+      || ct.includes("wordprocessing") || ct.includes("msword");
+    if (!isRelevantType) continue;
+
+    // Skip generic inline images (logos, signatures)
+    const lf = filename.toLowerCase();
+    if (ct.startsWith("image/") && att.content_disposition === "inline") {
+      if (/^(image\d*|logo|banner|signature|icon|spacer)\.(png|jpg|gif)$/i.test(lf)) continue;
+      if (att.size && att.size < 15000) continue; // <15KB inline image = probably logo
+    }
+
+    // Dedup check
+    const sourceEmailId = `nylas:${msg.id}:${att.id}`;
+    const { data: existing } = await supabase
+      .from("documents")
+      .select("id")
+      .eq("source_email_id", sourceEmailId)
+      .limit(1);
+    if (existing?.length) continue;
+
+    // Download
+    const dlResp = await fetch(
+      `${NYLAS_API}/grants/${grantId}/attachments/${att.id}/download?message_id=${msg.id}`,
+      { headers: { Authorization: `Bearer ${nylasApiKey}` } },
+    );
+    if (!dlResp.ok) continue;
+
+    const fileBuffer = await dlResp.arrayBuffer();
+    const fileBytes = new Uint8Array(fileBuffer);
+    const hash = await sha256(fileBytes);
+
+    // SHA-256 dedup
+    const { data: hashDup } = await supabase
+      .from("documents")
+      .select("id")
+      .eq("content_hash_sha256", hash)
+      .eq("client_id", clientId)
+      .limit(1);
+    if (hashDup?.length) continue;
+
+    // Upload
+    const ext = filename.split(".").pop() || "pdf";
+    const storagePath = `${clientId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+    const { error: uploadErr } = await supabase.storage
+      .from("documents").upload(storagePath, fileBytes, { contentType: ct });
+    if (uploadErr) continue;
+
+    const { data: urlData } = supabase.storage.from("documents").getPublicUrl(storagePath);
+
+    const { data: doc } = await supabase.from("documents").insert({
+      client_id: clientId, office_id: officeId,
+      file_name: filename || `attachment.${ext}`,
+      file_size: att.size || fileBytes.length,
+      file_type: ct,
+      file_url: urlData.publicUrl,
+      source: "email", source_email_id: sourceEmailId,
+      status: "processing",
+      extraction_strategy: "attachment",
+      email_message_id: emailMsgId,
+      content_hash_sha256: hash,
+    }).select().single();
+
+    if (doc) {
+      fetch(`${supabaseUrl}/functions/v1/extract-document`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${anonKey}` },
+        body: JSON.stringify({ documentId: doc.id }),
+      }).catch(e => console.error("Extract trigger failed:", e));
+      count++;
+    }
+  }
+  return count;
+}
+
+async function extractBodyInvoice(
+  msg: any, grantId: string, nylasApiKey: string,
+  clientId: string, officeId: string,
+  supabase: any, supabaseUrl: string, anonKey: string,
+  emailMsgId: string,
+): Promise<number> {
+  // Fetch full message body
+  const msgResp = await fetch(
+    `${NYLAS_API}/grants/${grantId}/messages/${msg.id}`,
+    { headers: { Authorization: `Bearer ${nylasApiKey}`, Accept: "application/json" } },
+  );
+  if (!msgResp.ok) return 0;
+
+  const fullMsg = await msgResp.json();
+  const body = fullMsg.data?.body || fullMsg.body || "";
+  if (!body || body.length < 100) return 0;
+
+  // Dedup check
+  const sourceEmailId = `nylas:${msg.id}:body`;
+  const { data: existing } = await supabase
+    .from("documents")
+    .select("id")
+    .eq("source_email_id", sourceEmailId)
+    .limit(1);
+  if (existing?.length) return 0;
+
+  // Hash the body text for dedup
+  const bodyBytes = new TextEncoder().encode(body);
+  const hash = await sha256(bodyBytes);
+
+  const { data: hashDup } = await supabase
+    .from("documents")
+    .select("id")
+    .eq("content_hash_sha256", hash)
+    .eq("client_id", clientId)
+    .limit(1);
+  if (hashDup?.length) return 0;
+
+  // Store the HTML body as the "file" — no actual file upload needed for body invoices
+  // We store the HTML in original_email_html and create a placeholder file_url
+  const subject = msg.subject || "Email doklad";
+  const fromEmail = msg.from?.[0]?.email || "unknown";
+  const fileName = `${subject.slice(0, 60).replace(/[^a-zA-Z0-9áäčďéíĺľňóôŕšťúýžÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ ]/g, "_")}.html`;
+
+  // Upload HTML as file for consistent storage
+  const htmlBytes = new TextEncoder().encode(body);
+  const storagePath = `${clientId}/${Date.now()}_body_${Math.random().toString(36).slice(2)}.html`;
+  const { error: uploadErr } = await supabase.storage
+    .from("documents").upload(storagePath, htmlBytes, { contentType: "text/html" });
+  if (uploadErr) {
+    console.error("Body upload failed:", uploadErr);
+    return 0;
+  }
+
+  const { data: urlData } = supabase.storage.from("documents").getPublicUrl(storagePath);
+
+  const { data: doc } = await supabase.from("documents").insert({
+    client_id: clientId, office_id: officeId,
+    file_name: fileName,
+    file_size: htmlBytes.length,
+    file_type: "text/html",
+    file_url: urlData.publicUrl,
+    source: "email", source_email_id: sourceEmailId,
+    status: "processing",
+    extraction_strategy: "body_invoice",
+    email_message_id: emailMsgId,
+    content_hash_sha256: hash,
+    original_email_html: body,
+  }).select().single();
+
+  if (doc) {
     fetch(`${supabaseUrl}/functions/v1/extract-document`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${anonKey}` },
-      body: JSON.stringify({ documentId }),
-    }).catch((e) => console.error("Extract trigger failed:", e));
-    return true;
+      body: JSON.stringify({ documentId: doc.id }),
+    }).catch(e => console.error("Body extract trigger failed:", e));
+    return 1;
   }
-
-  const extractResp = await fetch(`${supabaseUrl}/functions/v1/extract-document`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${anonKey}` },
-    body: JSON.stringify({ documentId }),
-  });
-
-  if (!extractResp.ok) {
-    console.error("Extract sync failed:", extractResp.status, await extractResp.text());
-    return false;
-  }
-
-  return true;
+  return 0;
 }
+
+async function extractDownloadLinks(
+  msg: any, grantId: string, nylasApiKey: string,
+  clientId: string, officeId: string,
+  supabase: any, supabaseUrl: string, anonKey: string,
+  emailMsgId: string,
+  senderMap: Map<string, SenderRule>,
+): Promise<number> {
+  const fromDomain = (msg.from?.[0]?.email || "").split("@")[1]?.toLowerCase() || "";
+  const senderRule = senderMap.get(fromDomain);
+
+  // SAFETY: only follow links from trusted senders
+  if (!senderRule || senderRule.classification !== "trusted_invoicer") return 0;
+
+  // Fetch full message body
+  const msgResp = await fetch(
+    `${NYLAS_API}/grants/${grantId}/messages/${msg.id}`,
+    { headers: { Authorization: `Bearer ${nylasApiKey}`, Accept: "application/json" } },
+  );
+  if (!msgResp.ok) return 0;
+
+  const fullMsg = await msgResp.json();
+  const body = fullMsg.data?.body || fullMsg.body || "";
+
+  // Find download links in HTML
+  const linkPatterns = [
+    /href="(https?:\/\/[^"]*(?:invoice|faktura|receipt|doklad|download|pdf|billing)[^"]*)"/gi,
+    /href="(https?:\/\/[^"]*\.pdf[^"]*)"/gi,
+  ];
+
+  const links = new Set<string>();
+  for (const pattern of linkPatterns) {
+    let match;
+    while ((match = pattern.exec(body)) !== null) {
+      if (match[1] && links.size < 3) links.add(match[1]);
+    }
+  }
+
+  let count = 0;
+  for (const link of links) {
+    try {
+      const sourceEmailId = `nylas:${msg.id}:link:${links.size}`;
+      const { data: existing } = await supabase
+        .from("documents")
+        .select("id")
+        .eq("source_email_id", sourceEmailId)
+        .limit(1);
+      if (existing?.length) continue;
+
+      // Fetch the link with timeout
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+      const linkResp = await fetch(link, {
+        signal: controller.signal,
+        headers: { "User-Agent": "LedgerFlow/1.0 (accounting document agent)" },
+      });
+      clearTimeout(timeout);
+
+      if (!linkResp.ok) continue;
+
+      const ct = normalizeMimeType(linkResp.headers.get("content-type"));
+      if (ct !== "application/pdf" && !ct.startsWith("image/")) continue;
+
+      const fileBuffer = await linkResp.arrayBuffer();
+      const fileBytes = new Uint8Array(fileBuffer);
+      if (fileBytes.length < 5000) continue; // too small
+
+      const hash = await sha256(fileBytes);
+      const { data: hashDup } = await supabase
+        .from("documents")
+        .select("id")
+        .eq("content_hash_sha256", hash)
+        .eq("client_id", clientId)
+        .limit(1);
+      if (hashDup?.length) continue;
+
+      const ext = ct === "application/pdf" ? "pdf" : "jpg";
+      const storagePath = `${clientId}/${Date.now()}_link_${Math.random().toString(36).slice(2)}.${ext}`;
+      const { error: uploadErr } = await supabase.storage
+        .from("documents").upload(storagePath, fileBytes, { contentType: ct });
+      if (uploadErr) continue;
+
+      const { data: urlData } = supabase.storage.from("documents").getPublicUrl(storagePath);
+
+      const { data: doc } = await supabase.from("documents").insert({
+        client_id: clientId, office_id: officeId,
+        file_name: `downloaded_invoice.${ext}`,
+        file_size: fileBytes.length,
+        file_type: ct,
+        file_url: urlData.publicUrl,
+        source: "email", source_email_id: sourceEmailId,
+        status: "processing",
+        extraction_strategy: "download_link",
+        email_message_id: emailMsgId,
+        content_hash_sha256: hash,
+        download_source_url: link,
+      }).select().single();
+
+      if (doc) {
+        fetch(`${supabaseUrl}/functions/v1/extract-document`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${anonKey}` },
+          body: JSON.stringify({ documentId: doc.id }),
+        }).catch(e => console.error("Link extract failed:", e));
+        count++;
+      }
+    } catch (e) {
+      console.error("Link extraction error:", e);
+    }
+  }
+  return count;
+}
+
+// ─── MAIN SERVE ─────────────────────────────────────────────
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   const startTime = Date.now();
 
   try {
-    const { grantId, clientId, officeId, messageId, month, year, forceReextract } = await req.json();
+    const { grantId, clientId, officeId, month, year } = await req.json();
     if (!grantId || !clientId || !officeId) {
       return new Response(JSON.stringify({ error: "Missing required fields" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -221,236 +500,300 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const lovableApiKey = Deno.env.get("LOVABLE_API_KEY")!;
+    const anonKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY") || "";
     const supabase = createClient(supabaseUrl, serviceRoleKey);
 
-    // --- Fetch messages ---
-    let messagesToProcess: any[] = [];
+    // ── STAGE 1: DISCOVERY ──
+    console.log(`[Agent] Starting scan for client ${clientId}`);
 
-    if (messageId) {
-      const msgResp = await fetch(`${NYLAS_API}/grants/${grantId}/messages/${messageId}`, {
-        headers: { Authorization: `Bearer ${nylasApiKey}`, Accept: "application/json" },
-      });
-      if (msgResp.ok) {
-        const msgData = await msgResp.json();
-        messagesToProcess = [msgData.data];
-      }
+    // Compute date range with 7-day buffer
+    let receivedAfter: number, receivedBefore: number;
+    if (month && year) {
+      const from = new Date(Date.UTC(year, month - 2, 24)); // 7 days before prev month end
+      const to = new Date(Date.UTC(year, month, 7));         // 7 days after month end
+      receivedAfter = Math.floor(from.getTime() / 1000);
+      receivedBefore = Math.floor(to.getTime() / 1000);
     } else {
+      receivedAfter = Math.floor((Date.now() - 90 * 24 * 60 * 60 * 1000) / 1000);
+      receivedBefore = Math.floor(Date.now() / 1000);
+    }
+
+    // Fetch messages from multiple smart queries
+    const allMessages = new Map<string, any>();
+
+    for (const query of DISCOVERY_QUERIES) {
+      if (Date.now() - startTime > MAX_WALL_TIME_MS * 0.3) break; // don't spend too long on discovery
+
       let nextCursor: string | null = null;
       do {
         const params = new URLSearchParams({
-          has_attachment: "true",
+          search_query_native: query,
           limit: "50",
-          fields: "id,subject,from,date,attachments",
+          fields: "id,subject,from,date,attachments,snippet",
+          received_after: String(receivedAfter),
+          received_before: String(receivedBefore),
         });
-
-        if (month && year) {
-          const fromDate = new Date(Date.UTC(year, month - 2, 1, 0, 0, 0));
-          const toDate = new Date(Date.UTC(year, month + 1, 1, 0, 0, 0));
-          params.set("received_after", String(Math.floor(fromDate.getTime() / 1000)));
-          params.set("received_before", String(Math.floor(toDate.getTime() / 1000)));
-        } else {
-          const threeMonthsAgo = Math.floor((Date.now() - 3 * 30 * 24 * 60 * 60 * 1000) / 1000);
-          params.set("received_after", String(threeMonthsAgo));
-        }
-
         if (nextCursor) params.set("page_token", nextCursor);
 
-        const listResp = await fetch(`${NYLAS_API}/grants/${grantId}/messages?${params}`, {
-          headers: { Authorization: `Bearer ${nylasApiKey}`, Accept: "application/json" },
-        });
+        try {
+          const listResp = await fetch(`${NYLAS_API}/grants/${grantId}/messages?${params}`, {
+            headers: { Authorization: `Bearer ${nylasApiKey}`, Accept: "application/json" },
+          });
+          if (!listResp.ok) break;
 
-        if (!listResp.ok) {
-          const errText = await listResp.text();
-          console.error("Nylas list messages failed:", listResp.status, errText);
-          throw new Error(`Nylas API error: ${listResp.status}`);
+          const listData = await listResp.json();
+          for (const m of (listData.data || [])) {
+            if (!allMessages.has(m.id)) allMessages.set(m.id, m);
+          }
+          nextCursor = listData.next_cursor || null;
+        } catch (e) {
+          console.error(`Query failed: ${query}`, e);
+          break;
         }
-
-        const listData = await listResp.json();
-        messagesToProcess.push(...(listData.data || []));
-        nextCursor = listData.next_cursor || null;
       } while (nextCursor);
     }
 
-    console.log(`Processing ${messagesToProcess.length} messages for client ${clientId}`);
-    let processedCount = 0;
-    let skippedCount = 0;
-    let timedOut = false;
-
-    // --- Collect candidates ---
-    type CandidateAttachment = {
-      msg: any; att: any; emailSubject: string; emailFrom: string; isPdf: boolean;
-    };
-    const allCandidates: CandidateAttachment[] = [];
-
-    for (const msg of messagesToProcess) {
-      if (!msg.attachments || msg.attachments.length === 0) continue;
-      const emailSubject = msg.subject || "";
-      const emailFrom = msg.from?.[0]?.email || msg.from?.[0]?.name || "";
-
-      for (const att of msg.attachments) {
-        const filename = att.filename || "";
-        const contentType = normalizeMimeType(att.content_type);
-
-        // Pre-filter: skip inline, known bad types, tiny files
-        if (att.content_disposition === "inline") { skippedCount++; continue; }
-        if (ALWAYS_SKIP_CONTENT_TYPES.some((t) => contentType.includes(t))) { skippedCount++; continue; }
-        if (att.size && att.size < 3000) { skippedCount++; continue; }
-
-        // Pre-filter: generic image names are almost always marketing/inline
-        const lowerFilename = filename.toLowerCase();
-        if (contentType.startsWith("image/") && GENERIC_IMAGE_NAMES.includes(lowerFilename)) {
-          skippedCount++;
-          console.log(`Pre-skip generic: ${filename}`);
-          continue;
+    // Also fetch ANY email with attachments (catch stragglers)
+    try {
+      const params = new URLSearchParams({
+        has_attachment: "true",
+        limit: "100",
+        fields: "id,subject,from,date,attachments,snippet",
+        received_after: String(receivedAfter),
+        received_before: String(receivedBefore),
+      });
+      const listResp = await fetch(`${NYLAS_API}/grants/${grantId}/messages?${params}`, {
+        headers: { Authorization: `Bearer ${nylasApiKey}`, Accept: "application/json" },
+      });
+      if (listResp.ok) {
+        const listData = await listResp.json();
+        for (const m of (listData.data || [])) {
+          if (!allMessages.has(m.id)) allMessages.set(m.id, m);
         }
+      }
+    } catch {}
 
-        // Pre-filter: screenshots (Zrzut ekranu, Screenshot, Snímka obrazovky)
-        if (contentType.startsWith("image/") && /^(zrzut ekranu|screenshot|snímka|capture|bildschirmfoto)/i.test(lowerFilename)) {
-          skippedCount++;
-          console.log(`Pre-skip screenshot: ${filename}`);
-          continue;
-        }
+    const messages = Array.from(allMessages.values());
+    console.log(`[Agent] Discovery: ${messages.length} unique emails found`);
 
-        const isPdf = contentType === "application/pdf";
-        allCandidates.push({ msg, att, emailSubject, emailFrom, isPdf });
+    // ── STAGE 2: RULES ENGINE ──
+
+    // Load sender intelligence
+    const { data: senderRules } = await supabase
+      .from("sender_intelligence")
+      .select("sender_domain, classification, typical_content, force_include, force_exclude, known_vendor_name")
+      .or(`office_id.eq.${officeId},office_id.is.null`);
+
+    const senderMap = new Map<string, SenderRule>();
+    for (const r of (senderRules || [])) {
+      senderMap.set(r.sender_domain, r);
+    }
+
+    // Load already-processed message IDs
+    const { data: processed } = await supabase
+      .from("email_messages")
+      .select("nylas_message_id")
+      .eq("client_id", clientId)
+      .in("processing_status", ["done", "skipped"]);
+
+    const processedIds = new Set((processed || []).map((p: any) => p.nylas_message_id));
+
+    // Apply rules
+    const candidates: Array<{ msg: any; ruleResult: string }> = [];
+    let rulesSkipped = 0;
+
+    for (const msg of messages) {
+      const fromEmail = msg.from?.[0]?.email || "";
+      const subject = msg.subject || "";
+      const result = applyRules(fromEmail, subject, senderMap, processedIds, msg.id);
+
+      if (result === "skip") {
+        rulesSkipped++;
+        continue;
+      }
+      candidates.push({ msg, ruleResult: result });
+    }
+
+    console.log(`[Agent] Rules: ${candidates.length} candidates, ${rulesSkipped} skipped`);
+
+    // ── STAGE 3: AI TRIAGE ──
+
+    const toProcess: Array<{ msg: any; triage: TriageResult }> = [];
+
+    // Trusted senders skip triage — go straight to extraction
+    for (const c of candidates) {
+      if (c.ruleResult === "trusted") {
+        const fromDomain = (c.msg.from?.[0]?.email || "").split("@")[1]?.toLowerCase() || "";
+        const rule = senderMap.get(fromDomain);
+        toProcess.push({
+          msg: c.msg,
+          triage: {
+            is_accounting: true,
+            confidence: 95,
+            content_types: rule?.typical_content ? [rule.typical_content] : ["attachment", "body_invoice"],
+            reasoning: `trusted sender: ${fromDomain}`,
+          },
+        });
       }
     }
 
-    // Sort: PDFs first
-    allCandidates.sort((a, b) => (b.isPdf ? 1 : 0) - (a.isPdf ? 1 : 0));
-    console.log(`Candidates: ${allCandidates.length} (${allCandidates.filter(c => c.isPdf).length} PDFs)`);
+    // Non-trusted: batch triage with AI
+    const untriaged = candidates.filter(c => c.ruleResult !== "trusted");
 
-    // --- Helper: process a single candidate ---
-    async function processCandidate(candidate: CandidateAttachment): Promise<"processed" | "skipped" | "exists"> {
-      const { msg, att, emailSubject, emailFrom, isPdf } = candidate;
-      const normalizedMimeType = normalizeMimeType(att.content_type);
-      const filename = att.filename || "";
-      const sourceEmailId = `nylas:${msg.id}:${att.id}`;
+    for (let i = 0; i < untriaged.length; i += TRIAGE_BATCH_SIZE) {
+      if (Date.now() - startTime > MAX_WALL_TIME_MS * 0.5) break;
 
-      // Check if already exists
-      const { data: existing } = await supabase
-        .from("documents")
-        .select("id, status, document_type, supplier_name, total_amount, issue_date, ai_confidence")
-        .eq("source_email_id", sourceEmailId)
-        .limit(1);
+      const batch = untriaged.slice(i, i + TRIAGE_BATCH_SIZE);
+      const triageInput = batch.map(c => ({
+        from: c.msg.from?.[0]?.email || "",
+        subject: c.msg.subject || "",
+        snippet: (c.msg.snippet || "").slice(0, 300),
+        attachments: (c.msg.attachments || []).map((a: any) => `${a.filename} (${a.content_type})`).join(", "),
+        is_forwarded: /^(fwd:|fw:|preposlané|přeposláno)/i.test(c.msg.subject || ""),
+      }));
 
-      if (existing && existing.length > 0) {
-        const existingDoc = existing[0];
-        const shouldRefresh =
-          forceReextract ||
-          existingDoc.status === "error" ||
-          existingDoc.status === "processing" ||
-          existingDoc.status === "rejected" ||
-          (existingDoc.status !== "approved" && (
-            !existingDoc.document_type ||
-            !existingDoc.supplier_name ||
-            existingDoc.total_amount == null ||
-            !existingDoc.issue_date ||
-            (existingDoc.ai_confidence ?? 0) < 70
-          ));
+      const results = await triageBatch(triageInput, lovableApiKey);
 
-        if (shouldRefresh) {
-          const extractionTriggered = await triggerDocumentExtraction(existingDoc.id, supabaseUrl, Boolean(forceReextract));
-          if (extractionTriggered) return "processed";
-          if (forceReextract) return "skipped";
-        }
-        return "exists";
-      }
+      for (let j = 0; j < batch.length; j++) {
+        const triage = results[j] || { is_accounting: false, confidence: 0, content_types: [], reasoning: "no result" };
 
-      // Download attachment
-      const dlResp = await fetch(
-        `${NYLAS_API}/grants/${grantId}/attachments/${att.id}/download?message_id=${msg.id}`,
-        { headers: { Authorization: `Bearer ${nylasApiKey}` } },
-      );
-      if (!dlResp.ok) { console.error(`Download failed ${att.id}:`, dlResp.status); return "skipped"; }
+        // Save triage result to DB
+        await supabase.from("email_messages").upsert({
+          nylas_message_id: batch[j].msg.id,
+          nylas_grant_id: grantId,
+          office_id: officeId,
+          client_id: clientId,
+          from_email: batch[j].msg.from?.[0]?.email || "",
+          from_name: batch[j].msg.from?.[0]?.name || "",
+          subject: batch[j].msg.subject || "",
+          received_at: batch[j].msg.date ? new Date(batch[j].msg.date * 1000).toISOString() : null,
+          snippet: (batch[j].msg.snippet || "").slice(0, 500),
+          has_attachments: (batch[j].msg.attachments?.length || 0) > 0,
+          attachment_count: batch[j].msg.attachments?.length || 0,
+          triage_result: triage.is_accounting ? "accounting" : "not_accounting",
+          content_types: triage.content_types,
+          triage_confidence: triage.confidence,
+          triage_reasoning: triage.reasoning,
+          processing_status: triage.is_accounting ? "triaged" : "skipped",
+        }, { onConflict: "nylas_message_id" });
 
-      const fileBuffer = await dlResp.arrayBuffer();
-      const fileBytes = new Uint8Array(fileBuffer);
-
-      // For non-PDFs: AI classification
-      if (!isPdf) {
-        const classification = await classifyAttachmentByContent(
-          { filename, content_type: normalizedMimeType, size: att.size || fileBytes.length, bytes: fileBytes },
-          emailSubject, emailFrom, lovableApiKey,
-        );
-        if (!classification.relevant) {
-          console.log(`AI skip: ${filename} — ${classification.reason}`);
-          return "skipped";
+        if (triage.is_accounting && triage.confidence >= 30) {
+          toProcess.push({ msg: batch[j].msg, triage });
         }
       }
-
-      // Upload to storage
-      const ext = filename.split(".").pop() || (isPdf ? "pdf" : "bin");
-      const storagePath = `${clientId}/${Date.now()}_email_${Math.random().toString(36).slice(2)}.${ext}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("documents")
-        .upload(storagePath, fileBytes, { contentType: normalizedMimeType });
-      if (uploadError) { console.error("Upload failed:", uploadError); return "skipped"; }
-
-      const { data: urlData } = supabase.storage.from("documents").getPublicUrl(storagePath);
-
-      const { data: doc, error: insertError } = await supabase
-        .from("documents")
-        .insert({
-          client_id: clientId, office_id: officeId,
-          file_name: filename || `email_attachment.${ext}`,
-          file_size: att.size || fileBytes.length,
-          file_type: normalizedMimeType,
-          file_url: urlData.publicUrl,
-          source: "email", source_email_id: sourceEmailId, status: "processing",
-        })
-        .select().single();
-
-      if (insertError) { console.error("Insert failed:", insertError); return "skipped"; }
-
-      if (doc) {
-        const extractionTriggered = await triggerDocumentExtraction(doc.id, supabaseUrl, Boolean(forceReextract));
-        if (forceReextract && !extractionTriggered) {
-          return "skipped";
-        }
-      }
-
-      console.log(`Processed ${isPdf ? "PDF" : "image"}: ${filename} from "${emailSubject}"`);
-      return "processed";
     }
 
-    // --- Process in batches ---
-    // PDFs first (no AI needed, fast), then images in parallel batches
-    for (let i = 0; i < allCandidates.length; i += AI_BATCH_SIZE) {
+    console.log(`[Agent] Triage: ${toProcess.length} emails to extract`);
+
+    // ── STAGE 4: MULTI-STRATEGY EXTRACTION ──
+
+    let totalDocs = 0;
+
+    for (const { msg, triage } of toProcess) {
       if (Date.now() - startTime > MAX_WALL_TIME_MS) {
-        console.log(`Time limit reached after ${i} candidates`);
-        timedOut = true;
+        console.log("[Agent] Time limit reached during extraction");
         break;
       }
 
-      const batch = allCandidates.slice(i, i + AI_BATCH_SIZE);
-      const results = await Promise.allSettled(batch.map(c => processCandidate(c)));
+      const types = new Set(triage.content_types);
+      let docsFromMsg = 0;
 
-      for (const r of results) {
-        if (r.status === "fulfilled") {
-          if (r.value === "processed") processedCount++;
-          else if (r.value === "skipped") skippedCount++;
-        } else {
-          skippedCount++;
-          console.error("Candidate error:", r.reason);
-        }
+      // Ensure email_messages record exists for trusted senders too
+      const { data: emailMsg } = await supabase.from("email_messages").upsert({
+        nylas_message_id: msg.id,
+        nylas_grant_id: grantId,
+        office_id: officeId,
+        client_id: clientId,
+        from_email: msg.from?.[0]?.email || "",
+        from_name: msg.from?.[0]?.name || "",
+        subject: msg.subject || "",
+        received_at: msg.date ? new Date(msg.date * 1000).toISOString() : null,
+        snippet: (msg.snippet || "").slice(0, 500),
+        has_attachments: (msg.attachments?.length || 0) > 0,
+        attachment_count: msg.attachments?.length || 0,
+        triage_result: "accounting",
+        content_types: triage.content_types,
+        triage_confidence: triage.confidence,
+        processing_status: "extracting",
+      }, { onConflict: "nylas_message_id" }).select().single();
+
+      const emailMsgId = emailMsg?.id || null;
+
+      // Strategy A: Attachments
+      if (types.has("attachment") || (msg.attachments?.length > 0)) {
+        try {
+          const n = await extractAttachments(msg, grantId, nylasApiKey, clientId, officeId, supabase, supabaseUrl, anonKey, emailMsgId);
+          docsFromMsg += n;
+        } catch (e) { console.error("Attachment extraction error:", e); }
       }
+
+      // Strategy C: Body is invoice (BEFORE inline images — more common)
+      if (types.has("body_invoice")) {
+        try {
+          const n = await extractBodyInvoice(msg, grantId, nylasApiKey, clientId, officeId, supabase, supabaseUrl, anonKey, emailMsgId);
+          docsFromMsg += n;
+        } catch (e) { console.error("Body extraction error:", e); }
+      }
+
+      // Strategy D: Download links
+      if (types.has("download_link")) {
+        try {
+          const n = await extractDownloadLinks(msg, grantId, nylasApiKey, clientId, officeId, supabase, supabaseUrl, anonKey, emailMsgId, senderMap);
+          docsFromMsg += n;
+        } catch (e) { console.error("Link extraction error:", e); }
+      }
+
+      // Update email_messages with results
+      await supabase.from("email_messages").update({
+        processing_status: "done",
+        documents_created: docsFromMsg,
+        updated_at: new Date().toISOString(),
+      }).eq("nylas_message_id", msg.id);
+
+      totalDocs += docsFromMsg;
     }
 
-    console.log(`Done: processed=${processedCount}, skipped=${skippedCount}, timedOut=${timedOut}`);
+    // ── STAGE 6: LEARNING — update sender stats ──
 
+    const senderCounts = new Map<string, number>();
+    for (const { msg } of toProcess) {
+      const domain = (msg.from?.[0]?.email || "").split("@")[1]?.toLowerCase();
+      if (domain) senderCounts.set(domain, (senderCounts.get(domain) || 0) + 1);
+    }
+
+    for (const [domain, count] of senderCounts) {
+      await supabase.from("sender_intelligence").upsert({
+        office_id: officeId,
+        sender_domain: domain,
+        emails_seen: count,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "office_id,sender_domain" });
+      // Increment counter (upsert doesn't support increment, so we do it manually)
+      await supabase.rpc("increment_sender_emails_seen", { p_office_id: officeId, p_domain: domain, p_count: count }).catch(() => {});
+    }
+
+    // Update sync timestamp
     await supabase
       .from("email_integrations")
       .update({ last_sync_at: new Date().toISOString() })
       .eq("nylas_grant_id", grantId);
 
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+    console.log(`[Agent] Done in ${elapsed}s: ${messages.length} discovered, ${toProcess.length} processed, ${totalDocs} documents created`);
+
     return new Response(
-      JSON.stringify({ success: true, processed: processedCount, skipped: skippedCount, timedOut }),
+      JSON.stringify({
+        success: true,
+        discovered: messages.length,
+        rulesSkipped,
+        triaged: toProcess.length,
+        documentsCreated: totalDocs,
+        elapsedSeconds: elapsed,
+      }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {
-    console.error("scan-emails error:", e);
+    console.error("[Agent] Fatal error:", e);
     return new Response(
       JSON.stringify({ error: e instanceof Error ? e.message : "Unknown" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
