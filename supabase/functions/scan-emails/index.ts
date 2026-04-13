@@ -16,6 +16,10 @@ const ALWAYS_SKIP_CONTENT_TYPES = [
   "application/vnd.ms-powerpoint",
 ];
 
+function normalizeMimeType(contentType?: string | null) {
+  return contentType?.split(";")[0]?.trim().toLowerCase() || "application/octet-stream";
+}
+
 /**
  * Uses AI to classify whether an email attachment is likely an accounting document.
  * Returns { relevant: boolean, reason: string }
@@ -249,7 +253,7 @@ serve(async (req) => {
 
       for (const att of msg.attachments) {
         const filename = att.filename || "";
-        const contentType = att.content_type || "";
+        const contentType = normalizeMimeType(att.content_type);
 
         // Skip inline images (email signatures, logos embedded in HTML)
         if (att.content_disposition === "inline") {
@@ -344,11 +348,12 @@ serve(async (req) => {
         const filename = att.filename || "";
         const ext = filename.split(".").pop() || "pdf";
         const storagePath = `${clientId}/${Date.now()}_email_${Math.random().toString(36).slice(2)}.${ext}`;
+        const normalizedMimeType = normalizeMimeType(att.content_type);
 
         const { error: uploadError } = await supabase.storage
           .from("documents")
           .upload(storagePath, fileBytes, {
-            contentType: att.content_type || "application/pdf",
+            contentType: normalizedMimeType,
           });
 
         if (uploadError) {
@@ -365,7 +370,7 @@ serve(async (req) => {
             office_id: officeId,
             file_name: filename || `email_attachment.${ext}`,
             file_size: att.size || fileBytes.length,
-            file_type: att.content_type || "application/pdf",
+            file_type: normalizedMimeType,
             file_url: urlData.publicUrl,
             source: "email",
             source_email_id: sourceEmailId,
