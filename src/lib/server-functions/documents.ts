@@ -246,3 +246,42 @@ export const moveDocumentPeriod = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { success: true };
   });
+
+export const deleteDocuments = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(
+    z.object({
+      documentIds: z.array(z.string().uuid()).min(1),
+    })
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+
+    const { data: docs, error: docsError } = await supabase
+      .from("documents")
+      .select("id, file_url, thumbnail_url")
+      .in("id", data.documentIds);
+
+    if (docsError) throw new Error(docsError.message);
+    if (!docs || docs.length === 0) return { deleted: 0 };
+
+    const storagePaths = docs
+      .flatMap((doc) => [getDocumentsStoragePath(doc.file_url), getDocumentsStoragePath(doc.thumbnail_url)])
+      .filter(Boolean) as string[];
+
+    if (storagePaths.length > 0) {
+      try {
+        await supabaseAdmin.storage.from("documents").remove(storagePaths);
+      } catch {
+        // keep going even if storage cleanup fails
+      }
+    }
+
+    const { error: deleteError } = await supabase
+      .from("documents")
+      .delete()
+      .in("id", docs.map((doc) => doc.id));
+
+    if (deleteError) throw new Error(deleteError.message);
+    return { deleted: docs.length };
+  });

@@ -2,6 +2,7 @@ import { createFileRoute, Link, useSearch } from "@tanstack/react-router";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { FileText, Mail, Building2, ArrowLeft, Loader2, Upload, RefreshCw, Copy, Check, LinkIcon, Plus, Trash2, GripVertical, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clientQueryOptions } from "@/lib/query-options";
@@ -12,8 +13,8 @@ import {
   exchangeNylasCode,
   triggerEmailScan,
   disconnectEmail,
-  resetEmailSyncPeriod,
   moveDocumentPeriod,
+  deleteDocuments,
 } from "@/lib/server-functions";
 import {
   initBankConnection,
@@ -74,6 +75,7 @@ function ClientDetailPage() {
   const [creatingInvite, setCreatingInvite] = useState(false);
   const [emailDialogOpen, setEmailDialogOpen] = useState(false);
   const [draggedDocId, setDraggedDocId] = useState<string | null>(null);
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const queryClient = useQueryClient();
 
   const now = new Date();
@@ -166,6 +168,87 @@ function ClientDetailPage() {
     const p = getDocPeriod(doc);
     return p.month === viewMonth && p.year === viewYear;
   });
+
+  const currentPeriodDocIds = currentPeriodDocs.map((doc: any) => doc.id);
+  const selectedCurrentPeriodIds = currentPeriodDocs
+    .filter((doc: any) => selectedDocumentIds.includes(doc.id))
+    .map((doc: any) => doc.id);
+  const allCurrentPeriodSelected = currentPeriodDocs.length > 0 && selectedCurrentPeriodIds.length === currentPeriodDocs.length;
+
+  useEffect(() => {
+    setSelectedDocumentIds([]);
+  }, [viewMonth, viewYear]);
+
+  useEffect(() => {
+    const validIds = new Set((documents || []).map((doc: any) => doc.id));
+    setSelectedDocumentIds((current) => current.filter((id) => validIds.has(id)));
+  }, [documents]);
+
+  const invalidateDocumentQueries = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["client", clientId] }),
+      queryClient.invalidateQueries({ queryKey: ["documents"] }),
+      queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] }),
+    ]);
+  }, [clientId, queryClient]);
+
+  const toggleDocumentSelection = useCallback((documentId: string) => {
+    setSelectedDocumentIds((current) =>
+      current.includes(documentId) ? current.filter((id) => id !== documentId) : [...current, documentId]
+    );
+  }, []);
+
+  const toggleSelectAllCurrentPeriod = useCallback(() => {
+    setSelectedDocumentIds((current) => {
+      const otherMonthIds = current.filter((id) => !currentPeriodDocIds.includes(id));
+      return allCurrentPeriodSelected ? otherMonthIds : [...otherMonthIds, ...currentPeriodDocIds];
+    });
+  }, [allCurrentPeriodSelected, currentPeriodDocIds]);
+
+  const handleRefreshMonth = useCallback(async () => {
+    setScanning(true);
+    try {
+      const result = await triggerEmailScan({ data: { clientId, month: viewMonth, year: viewYear } });
+      await invalidateDocumentQueries();
+      toast.success(`Sync ${MONTH_NAMES[viewMonth - 1].toLowerCase()} ${viewYear}: ${result.processed} importovaných alebo aktualizovaných, ${result.skipped ?? 0} preskočených`);
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Nepodarilo sa synchronizovať e-maily"));
+    } finally {
+      setScanning(false);
+    }
+  }, [clientId, invalidateDocumentQueries, viewMonth, viewYear]);
+
+  const handleDeleteDocuments = useCallback(async () => {
+    const targetDocIds = selectedCurrentPeriodIds.length > 0 ? selectedCurrentPeriodIds : currentPeriodDocIds;
+
+    if (targetDocIds.length === 0) {
+      toast.message(`Za ${MONTH_NAMES[viewMonth - 1].toLowerCase()} ${viewYear} tu nie sú žiadne doklady na zmazanie`);
+      return;
+    }
+
+    const deleteSelected = selectedCurrentPeriodIds.length > 0;
+    const confirmed = window.confirm(
+      `${deleteSelected ? "Vymazať označené" : "Vymazať všetky"} lokálne doklady za ${MONTH_NAMES[viewMonth - 1].toLowerCase()} ${viewYear}? Emaily v schránke sa tým nikdy nemažú.`
+    );
+    if (!confirmed) return;
+
+    setScanning(true);
+    try {
+      const result = await deleteDocuments({ data: { documentIds: targetDocIds } });
+
+      if (selectedDoc && targetDocIds.includes(selectedDoc.id)) {
+        setSelectedDoc(null);
+      }
+
+      setSelectedDocumentIds((current) => current.filter((id) => !targetDocIds.includes(id)));
+      await invalidateDocumentQueries();
+      toast.success(`Zmazaných lokálnych dokladov: ${result.deleted}`);
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Nepodarilo sa vymazať doklady"));
+    } finally {
+      setScanning(false);
+    }
+  }, [currentPeriodDocIds, deleteDocuments, invalidateDocumentQueries, selectedCurrentPeriodIds, selectedDoc, viewMonth, viewYear]);
 
   function prevMonth() {
     if (viewMonth === 1) { setViewMonth(12); setViewYear(y => y - 1); }
@@ -305,18 +388,7 @@ function ClientDetailPage() {
                             className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
                             title="Synchronizovať e-maily"
                             disabled={scanning}
-                            onClick={async () => {
-                              setScanning(true);
-                              try {
-                                const result = await triggerEmailScan({ data: { clientId, month: viewMonth, year: viewYear } });
-                                await queryClient.invalidateQueries({ queryKey: ["client", clientId] });
-                                toast.success(`Synchronizácia ${MONTH_NAMES[viewMonth - 1].toLowerCase()} ${viewYear}: ${result.processed} dokladov, ${result.skipped ?? 0} preskočených`);
-                              } catch (error) {
-                                toast.error(getErrorMessage(error, "Nepodarilo sa synchronizovať e-maily"));
-                              } finally {
-                                setScanning(false);
-                              }
-                            }}
+                            onClick={handleRefreshMonth}
                           >
                             <RefreshCw className={`h-3 w-3 ${scanning ? "animate-spin" : ""}`} />
                           </Button>
@@ -324,45 +396,9 @@ function ClientDetailPage() {
                             size="icon"
                             variant="ghost"
                             className="h-6 w-6 shrink-0 text-destructive hover:text-destructive"
-                            title="Vymazať import tohto mesiaca a spraviť novú extrakciu"
+                            title="Vymazať označené alebo všetky lokálne doklady za zobrazený mesiac"
                             disabled={scanning}
-                            onClick={async () => {
-                              const confirmed = window.confirm(
-                                `Vymazať importované emailové doklady za ${MONTH_NAMES[viewMonth - 1].toLowerCase()} ${viewYear} a načítať ich znova? Emaily v schránke sa tým nemažú.`
-                              );
-                              if (!confirmed) return;
-
-                              setScanning(true);
-                              let deletedCount = 0;
-
-                              try {
-                                const resetResult = await resetEmailSyncPeriod({ data: { clientId, month: viewMonth, year: viewYear } });
-                                deletedCount = resetResult.deleted;
-
-                                if (selectedDoc?.source === "email") {
-                                  const selectedPeriod = getDocPeriod(selectedDoc);
-                                  if (selectedPeriod.month === viewMonth && selectedPeriod.year === viewYear) {
-                                    setSelectedDoc(null);
-                                  }
-                                }
-
-                                await queryClient.invalidateQueries({ queryKey: ["client", clientId] });
-
-                                const scanResult = await triggerEmailScan({ data: { clientId, month: viewMonth, year: viewYear } });
-                                await queryClient.invalidateQueries({ queryKey: ["client", clientId] });
-                                toast.success(`Reset: ${resetResult.deleted} zmazaných importov, nová synchronizácia: ${scanResult.processed} dokladov`);
-                              } catch (error) {
-                                await queryClient.invalidateQueries({ queryKey: ["client", clientId] });
-
-                                if (deletedCount > 0) {
-                                  toast.warning(`Import za ${MONTH_NAMES[viewMonth - 1].toLowerCase()} ${viewYear} bol zmazaný (${deletedCount}), ale nový scan zlyhal: ${getErrorMessage(error, "Neznáma chyba")}`);
-                                } else {
-                                  toast.error(getErrorMessage(error, "Nepodarilo sa spraviť reset a novú extrakciu"));
-                                }
-                              } finally {
-                                setScanning(false);
-                              }
-                            }}
+                            onClick={handleDeleteDocuments}
                           >
                             <Trash2 className="h-3 w-3" />
                           </Button>
@@ -466,7 +502,19 @@ function ClientDetailPage() {
         <div>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold">Doklady klienta</h2>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 px-2 text-xs"
+                onClick={toggleSelectAllCurrentPeriod}
+                disabled={currentPeriodDocs.length === 0}
+              >
+                {allCurrentPeriodSelected ? "Zrušiť výber" : "Označiť všetko"}
+              </Button>
+              {selectedCurrentPeriodIds.length > 0 && (
+                <span className="text-xs text-muted-foreground">{selectedCurrentPeriodIds.length} označených</span>
+              )}
               <button onClick={prevMonth} className="p-1 min-h-[44px] min-w-[44px] flex items-center justify-center hover:bg-muted transition-colors">
                 <ChevronLeft className="h-4 w-4" />
               </button>
@@ -508,7 +556,7 @@ function ClientDetailPage() {
                     <Card
                       key={doc.id}
                       draggable
-                      className="cursor-grab active:cursor-grabbing hover:shadow-md transition-all overflow-hidden"
+                      className={`cursor-grab active:cursor-grabbing hover:shadow-md transition-all overflow-hidden ${selectedDocumentIds.includes(doc.id) ? "ring-1 ring-primary bg-primary/5" : ""}`}
                       onDragStart={(e) => {
                         e.dataTransfer.setData("text/plain", doc.id);
                         setDraggedDocId(doc.id);
@@ -517,7 +565,18 @@ function ClientDetailPage() {
                       onClick={() => setSelectedDoc(doc)}
                     >
                       {/* Thumbnail */}
-                      <div className="aspect-[4/3] bg-muted/30 flex items-center justify-center overflow-hidden border-b border-border">
+                      <div className="relative aspect-[4/3] bg-muted/30 flex items-center justify-center overflow-hidden border-b border-border">
+                        <div
+                          className="absolute left-2 top-2 z-10 border border-border bg-background/95 p-1"
+                          onClick={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
+                        >
+                          <Checkbox
+                            checked={selectedDocumentIds.includes(doc.id)}
+                            onCheckedChange={() => toggleDocumentSelection(doc.id)}
+                            aria-label={`Označiť ${doc.file_name || "doklad"}`}
+                          />
+                        </div>
                         {doc.file_url && isImage ? (
                           <img src={doc.file_url} alt={doc.file_name || "Document"} className="w-full h-full object-cover" />
                         ) : doc.file_url && isPdf ? (

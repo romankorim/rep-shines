@@ -7,6 +7,7 @@ export {
   updateDocumentFields,
   createDocumentRecord,
   moveDocumentPeriod,
+  deleteDocuments,
 } from "./documents";
 export { getVatOverview } from "./vat";
 export { getPortalStats, getPortalDocuments, getPortalDocumentsByMonth } from "./portal";
