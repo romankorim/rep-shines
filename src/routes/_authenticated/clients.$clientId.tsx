@@ -137,6 +137,26 @@ function ClientDetailPage() {
     setInitialPeriodSet(true);
   }, [data?.documents, initialPeriodSet]);
 
+  // Derive period docs safely (before early return so hooks below can reference them)
+  const documents = data?.documents || [];
+  const getDocPeriod = (doc: any) => {
+    if (doc.tax_period_month && doc.tax_period_year) {
+      return { month: doc.tax_period_month, year: doc.tax_period_year };
+    }
+    const d = new Date(doc.issue_date || doc.created_at);
+    return { month: d.getMonth() + 1, year: d.getFullYear() };
+  };
+
+  const currentPeriodDocs = documents.filter((doc: any) => {
+    const p = getDocPeriod(doc);
+    return p.month === viewMonth && p.year === viewYear;
+  });
+  const currentPeriodDocIds = currentPeriodDocs.map((doc: any) => doc.id);
+  const selectedCurrentPeriodIds = currentPeriodDocs
+    .filter((doc: any) => selectedDocumentIds.includes(doc.id))
+    .map((doc: any) => doc.id);
+  const allCurrentPeriodSelected = currentPeriodDocs.length > 0 && selectedCurrentPeriodIds.length === currentPeriodDocs.length;
+
   // Clear selection when period changes
   useEffect(() => {
     setSelectedDocumentIds([]);
@@ -144,10 +164,9 @@ function ClientDetailPage() {
 
   // Remove invalid selections when documents change
   useEffect(() => {
-    const docs = data?.documents || [];
-    const validIds = new Set(docs.map((doc: any) => doc.id));
+    const validIds = new Set(documents.map((doc: any) => doc.id));
     setSelectedDocumentIds((current) => current.filter((id) => validIds.has(id)));
-  }, [data?.documents]);
+  }, [documents]);
 
   const invalidateDocumentQueries = useCallback(async () => {
     await Promise.all([
@@ -173,33 +192,6 @@ function ClientDetailPage() {
     }
   }, [clientId, queryClient]);
 
-  if (isLoading || !data) {
-    return <DashboardLayout><div className="text-sm text-muted-foreground">Načítavam...</div></DashboardLayout>;
-  }
-
-  const { client, docCount, txCount, emailIntegrations, bankIntegration, documents } = data;
-  const connectedEmails = emailIntegrations.filter((e: any) => e.status === "connected");
-  const existingEmailAddresses = connectedEmails.map((e: any) => e.email_address?.toLowerCase()).filter(Boolean);
-
-  // Group documents by month/year (using tax_period or created_at)
-  const getDocPeriod = (doc: any) => {
-    if (doc.tax_period_month && doc.tax_period_year) {
-      return { month: doc.tax_period_month, year: doc.tax_period_year };
-    }
-    const d = new Date(doc.issue_date || doc.created_at);
-    return { month: d.getMonth() + 1, year: d.getFullYear() };
-  };
-
-  const currentPeriodDocs = documents.filter((doc: any) => {
-    const p = getDocPeriod(doc);
-    return p.month === viewMonth && p.year === viewYear;
-  });
-
-  const currentPeriodDocIds = currentPeriodDocs.map((doc: any) => doc.id);
-  const selectedCurrentPeriodIds = currentPeriodDocs
-    .filter((doc: any) => selectedDocumentIds.includes(doc.id))
-    .map((doc: any) => doc.id);
-  const allCurrentPeriodSelected = currentPeriodDocs.length > 0 && selectedCurrentPeriodIds.length === currentPeriodDocs.length;
   const toggleSelectAllCurrentPeriod = useCallback(() => {
     setSelectedDocumentIds((current) => {
       const otherMonthIds = current.filter((id) => !currentPeriodDocIds.includes(id));
@@ -210,7 +202,6 @@ function ClientDetailPage() {
   const handleRefreshMonth = useCallback(async () => {
     setScanning(true);
     try {
-      // Scan ALL emails (no month/year filter) so historical documents are found
       const result = await triggerEmailScan({ data: { clientId } });
       await invalidateDocumentQueries();
       toast.success(`Sync: ${result.processed} importovaných alebo aktualizovaných, ${result.skipped ?? 0} preskočených`);
@@ -253,6 +244,13 @@ function ClientDetailPage() {
     }
   }, [currentPeriodDocIds, deleteDocuments, invalidateDocumentQueries, selectedCurrentPeriodIds, selectedDoc, viewMonth, viewYear]);
 
+  if (isLoading || !data) {
+    return <DashboardLayout><div className="text-sm text-muted-foreground">Načítavam...</div></DashboardLayout>;
+  }
+
+  const { client, docCount, txCount, emailIntegrations, bankIntegration } = data;
+  const connectedEmails = emailIntegrations.filter((e: any) => e.status === "connected");
+  const existingEmailAddresses = connectedEmails.map((e: any) => e.email_address?.toLowerCase()).filter(Boolean);
   function prevMonth() {
     if (viewMonth === 1) { setViewMonth(12); setViewYear(y => y - 1); }
     else setViewMonth(m => m - 1);
