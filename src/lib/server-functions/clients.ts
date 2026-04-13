@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { z } from "zod";
 
 type DocumentWithPreview = {
@@ -21,33 +21,34 @@ function getDocumentsStoragePath(url?: string | null) {
 }
 
 async function attachSignedPreviewUrls(documents: DocumentWithPreview[]) {
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !serviceRoleKey) return documents;
+  try {
+    return await Promise.all(
+      documents.map(async (doc) => {
+        const nextDoc = { ...doc };
+        const candidates = [doc.file_url, doc.thumbnail_url].filter(Boolean) as string[];
 
-  const supabaseAdmin = createSupabaseClient(supabaseUrl, serviceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+        for (const originalUrl of candidates) {
+          const storagePath = getDocumentsStoragePath(originalUrl);
+          if (!storagePath) continue;
 
-  return Promise.all(
-    documents.map(async (doc) => {
-      const nextDoc = { ...doc };
-      const candidates = [doc.file_url, doc.thumbnail_url].filter(Boolean) as string[];
+          try {
+            const { data } = await supabaseAdmin.storage.from("documents").createSignedUrl(storagePath, 60 * 60);
+            if (!data?.signedUrl) continue;
 
-      for (const originalUrl of candidates) {
-        const storagePath = getDocumentsStoragePath(originalUrl);
-        if (!storagePath) continue;
+            if (originalUrl === doc.file_url) nextDoc.file_url = data.signedUrl;
+            if (originalUrl === doc.thumbnail_url) nextDoc.thumbnail_url = data.signedUrl;
+          } catch {
+            // Signed URL generation failed, keep original URL
+          }
+        }
 
-        const { data } = await supabaseAdmin.storage.from("documents").createSignedUrl(storagePath, 60 * 60);
-        if (!data?.signedUrl) continue;
-
-        if (originalUrl === doc.file_url) nextDoc.file_url = data.signedUrl;
-        if (originalUrl === doc.thumbnail_url) nextDoc.thumbnail_url = data.signedUrl;
-      }
-
-      return nextDoc;
-    })
-  );
+        return nextDoc;
+      })
+    );
+  } catch {
+    // supabaseAdmin not available (missing env vars), return docs as-is
+    return documents;
+  }
 }
 
 export const getClients = createServerFn({ method: "GET" })

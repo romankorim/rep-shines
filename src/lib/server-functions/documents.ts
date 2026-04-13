@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { z } from "zod";
 
 function getDocumentsStoragePath(url?: string | null) {
@@ -15,14 +15,6 @@ function getDocumentsStoragePath(url?: string | null) {
 }
 
 async function attachSignedPreviewUrls(documents: any[]) {
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !serviceRoleKey) return documents;
-
-  const supabaseAdmin = createSupabaseClient(supabaseUrl, serviceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
   return Promise.all(
     documents.map(async (doc) => {
       const nextDoc = { ...doc };
