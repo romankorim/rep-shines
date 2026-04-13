@@ -439,7 +439,9 @@ export type Database = {
           document_number: string | null
           document_type: Database["public"]["Enums"]["document_type"] | null
           due_date: string | null
+          email_message_id: string | null
           expense_category: string | null
+          extraction_strategy: string | null
           file_name: string | null
           file_size: number | null
           file_type: string | null
@@ -448,6 +450,7 @@ export type Database = {
           issue_date: string | null
           matched_transaction_id: string | null
           office_id: string
+          original_email_html: string | null
           source: Database["public"]["Enums"]["document_source"]
           source_email_id: string | null
           status: Database["public"]["Enums"]["document_status"]
@@ -478,7 +481,9 @@ export type Database = {
           document_number?: string | null
           document_type?: Database["public"]["Enums"]["document_type"] | null
           due_date?: string | null
+          email_message_id?: string | null
           expense_category?: string | null
+          extraction_strategy?: string | null
           file_name?: string | null
           file_size?: number | null
           file_type?: string | null
@@ -487,6 +492,7 @@ export type Database = {
           issue_date?: string | null
           matched_transaction_id?: string | null
           office_id: string
+          original_email_html?: string | null
           source?: Database["public"]["Enums"]["document_source"]
           source_email_id?: string | null
           status?: Database["public"]["Enums"]["document_status"]
@@ -517,7 +523,9 @@ export type Database = {
           document_number?: string | null
           document_type?: Database["public"]["Enums"]["document_type"] | null
           due_date?: string | null
+          email_message_id?: string | null
           expense_category?: string | null
+          extraction_strategy?: string | null
           file_name?: string | null
           file_size?: number | null
           file_type?: string | null
@@ -526,6 +534,7 @@ export type Database = {
           issue_date?: string | null
           matched_transaction_id?: string | null
           office_id?: string
+          original_email_html?: string | null
           source?: Database["public"]["Enums"]["document_source"]
           source_email_id?: string | null
           status?: Database["public"]["Enums"]["document_status"]
@@ -614,6 +623,75 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      email_messages: {
+        Row: {
+          attachment_count: number | null
+          client_id: string
+          content_types: string[] | null
+          created_at: string
+          documents_created: number | null
+          from_email: string | null
+          from_name: string | null
+          has_attachments: boolean | null
+          id: string
+          nylas_grant_id: string | null
+          nylas_message_id: string
+          office_id: string
+          processing_status: string | null
+          received_at: string | null
+          snippet: string | null
+          subject: string | null
+          triage_confidence: number | null
+          triage_reasoning: string | null
+          triage_result: string | null
+          updated_at: string
+        }
+        Insert: {
+          attachment_count?: number | null
+          client_id: string
+          content_types?: string[] | null
+          created_at?: string
+          documents_created?: number | null
+          from_email?: string | null
+          from_name?: string | null
+          has_attachments?: boolean | null
+          id?: string
+          nylas_grant_id?: string | null
+          nylas_message_id: string
+          office_id: string
+          processing_status?: string | null
+          received_at?: string | null
+          snippet?: string | null
+          subject?: string | null
+          triage_confidence?: number | null
+          triage_reasoning?: string | null
+          triage_result?: string | null
+          updated_at?: string
+        }
+        Update: {
+          attachment_count?: number | null
+          client_id?: string
+          content_types?: string[] | null
+          created_at?: string
+          documents_created?: number | null
+          from_email?: string | null
+          from_name?: string | null
+          has_attachments?: boolean | null
+          id?: string
+          nylas_grant_id?: string | null
+          nylas_message_id?: string
+          office_id?: string
+          processing_status?: string | null
+          received_at?: string | null
+          snippet?: string | null
+          subject?: string | null
+          triage_confidence?: number | null
+          triage_reasoning?: string | null
+          triage_result?: string | null
+          updated_at?: string
+        }
+        Relationships: []
       }
       profiles: {
         Row: {
@@ -705,6 +783,48 @@ export type Database = {
         }
         Relationships: []
       }
+      sender_intelligence: {
+        Row: {
+          classification: string | null
+          created_at: string
+          emails_seen: number | null
+          force_exclude: boolean | null
+          force_include: boolean | null
+          id: string
+          known_vendor_name: string | null
+          office_id: string | null
+          sender_domain: string
+          typical_content: string | null
+          updated_at: string
+        }
+        Insert: {
+          classification?: string | null
+          created_at?: string
+          emails_seen?: number | null
+          force_exclude?: boolean | null
+          force_include?: boolean | null
+          id?: string
+          known_vendor_name?: string | null
+          office_id?: string | null
+          sender_domain: string
+          typical_content?: string | null
+          updated_at?: string
+        }
+        Update: {
+          classification?: string | null
+          created_at?: string
+          emails_seen?: number | null
+          force_exclude?: boolean | null
+          force_include?: boolean | null
+          id?: string
+          known_vendor_name?: string | null
+          office_id?: string | null
+          sender_domain?: string
+          typical_content?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           id: string
@@ -734,6 +854,10 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      increment_sender_emails_seen: {
+        Args: { p_count: number; p_domain: string; p_office_id: string }
+        Returns: undefined
       }
     }
     Enums: {
