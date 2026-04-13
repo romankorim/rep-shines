@@ -1,7 +1,20 @@
 import { createServerFn } from "@tanstack/react-start";
+import { getRequest } from "@tanstack/react-start/server";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import dns from "node:dns";
+
+const FALLBACK_APP_URL = "https://id-preview--e35fe031-9c7f-4f24-ac03-1474b0aafb32.lovable.app";
+
+function getAppUrl() {
+  const request = getRequest();
+
+  if (request?.url) {
+    return new URL(request.url).origin;
+  }
+
+  return process.env.APP_URL || FALLBACK_APP_URL;
+}
 
 // Detect email provider via MX records (server-side DNS lookup)
 export const detectEmailProvider = createServerFn({ method: "POST" })
@@ -55,12 +68,11 @@ export const getNylasConnectUrl = createServerFn({ method: "POST" })
     provider: z.enum(["google", "microsoft", "imap"]).optional(),
     loginHint: z.string().email().optional(),
   }))
-  .handler(async ({ data, context }) => {
+  .handler(async ({ data }) => {
     const clientId = process.env.NYLAS_CLIENT_ID;
     if (!clientId) throw new Error("NYLAS_CLIENT_ID not configured");
 
-    const appUrl = process.env.APP_URL || `https://id-preview--e35fe031-9c7f-4f24-ac03-1474b0aafb32.lovable.app`;
-    const callbackUri = `${appUrl}/api/nylas/callback`;
+    const callbackUri = `${getAppUrl()}/api/nylas/callback`;
 
     const authUrl = new URL("https://api.us.nylas.com/v3/connect/auth");
     authUrl.searchParams.set("client_id", clientId);
@@ -100,7 +112,7 @@ export const exchangeNylasCode = createServerFn({ method: "POST" })
     const nylasApiKey = process.env.NYLAS_API_KEY;
     if (!nylasClientId || !nylasApiKey) throw new Error("Nylas not configured");
 
-    const appUrl = process.env.APP_URL || `https://id-preview--e35fe031-9c7f-4f24-ac03-1474b0aafb32.lovable.app`;
+    const callbackUri = `${getAppUrl()}/api/nylas/callback`;
 
     const tokenResp = await fetch("https://api.us.nylas.com/v3/connect/token", {
       method: "POST",
@@ -111,7 +123,7 @@ export const exchangeNylasCode = createServerFn({ method: "POST" })
       body: JSON.stringify({
         client_id: nylasClientId,
         code: data.code,
-        redirect_uri: `${appUrl}/api/nylas/callback`,
+        redirect_uri: callbackUri,
         grant_type: "authorization_code",
       }),
     });
