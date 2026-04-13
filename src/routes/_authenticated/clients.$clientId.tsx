@@ -40,6 +40,16 @@ const statusConfig: Record<string, { label: string; class: string }> = {
   error: { label: "Chyba", class: "bg-destructive/15 text-destructive" },
 };
 
+const docTypeLabels: Record<string, string> = {
+  received_invoice: "Prijatá faktúra",
+  issued_invoice: "Vydaná faktúra",
+  receipt: "Účtenka",
+  credit_note: "Dobropis",
+  advance_invoice: "Zálohová faktúra",
+  bank_statement: "Bankový výpis",
+  other: "Iné",
+};
+
 const MONTH_NAMES = [
   "Január", "Február", "Marec", "Apríl", "Máj", "Jún",
   "Júl", "August", "September", "Október", "November", "December",
