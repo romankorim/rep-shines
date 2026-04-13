@@ -137,6 +137,32 @@ function ClientDetailPage() {
     setInitialPeriodSet(true);
   }, [data?.documents, initialPeriodSet]);
 
+  // Clear selection when period changes
+  useEffect(() => {
+    setSelectedDocumentIds([]);
+  }, [viewMonth, viewYear]);
+
+  // Remove invalid selections when documents change
+  useEffect(() => {
+    const docs = data?.documents || [];
+    const validIds = new Set(docs.map((doc: any) => doc.id));
+    setSelectedDocumentIds((current) => current.filter((id) => validIds.has(id)));
+  }, [data?.documents]);
+
+  const invalidateDocumentQueries = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["client", clientId] }),
+      queryClient.invalidateQueries({ queryKey: ["documents"] }),
+      queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] }),
+    ]);
+  }, [clientId, queryClient]);
+
+  const toggleDocumentSelection = useCallback((documentId: string) => {
+    setSelectedDocumentIds((current) =>
+      current.includes(documentId) ? current.filter((id) => id !== documentId) : [...current, documentId]
+    );
+  }, []);
+
   const handleDropOnPeriod = useCallback(async (docId: string, targetMonth: number, targetYear: number) => {
     try {
       await moveDocumentPeriod({ data: { documentId: docId, targetMonth, targetYear } });
@@ -174,30 +200,6 @@ function ClientDetailPage() {
     .filter((doc: any) => selectedDocumentIds.includes(doc.id))
     .map((doc: any) => doc.id);
   const allCurrentPeriodSelected = currentPeriodDocs.length > 0 && selectedCurrentPeriodIds.length === currentPeriodDocs.length;
-
-  useEffect(() => {
-    setSelectedDocumentIds([]);
-  }, [viewMonth, viewYear]);
-
-  useEffect(() => {
-    const validIds = new Set((documents || []).map((doc: any) => doc.id));
-    setSelectedDocumentIds((current) => current.filter((id) => validIds.has(id)));
-  }, [documents]);
-
-  const invalidateDocumentQueries = useCallback(async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["client", clientId] }),
-      queryClient.invalidateQueries({ queryKey: ["documents"] }),
-      queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] }),
-    ]);
-  }, [clientId, queryClient]);
-
-  const toggleDocumentSelection = useCallback((documentId: string) => {
-    setSelectedDocumentIds((current) =>
-      current.includes(documentId) ? current.filter((id) => id !== documentId) : [...current, documentId]
-    );
-  }, []);
-
   const toggleSelectAllCurrentPeriod = useCallback(() => {
     setSelectedDocumentIds((current) => {
       const otherMonthIds = current.filter((id) => !currentPeriodDocIds.includes(id));
