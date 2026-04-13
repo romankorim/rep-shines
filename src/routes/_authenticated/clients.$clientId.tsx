@@ -185,7 +185,7 @@ function ClientDetailPage() {
   const handleRefreshMonth = useCallback(async () => {
     setScanning(true);
     try {
-      const result = await triggerEmailScan({ data: { clientId } });
+      const result = await triggerEmailScan({ data: { clientId, month: viewMonth, year: viewYear } });
       await invalidateDocumentQueries();
       toast.success(`Sync: ${result.processed} importovaných alebo aktualizovaných, ${result.skipped ?? 0} preskočených`);
     } catch (error) {
@@ -193,7 +193,7 @@ function ClientDetailPage() {
     } finally {
       setScanning(false);
     }
-  }, [clientId, invalidateDocumentQueries]);
+  }, [clientId, invalidateDocumentQueries, viewMonth, viewYear]);
 
   const handleDeleteDocuments = useCallback(async () => {
     const targetDocIds = selectedCurrentPeriodIds.length > 0 ? selectedCurrentPeriodIds : currentPeriodDocIds;

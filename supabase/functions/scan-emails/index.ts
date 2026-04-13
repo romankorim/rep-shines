@@ -217,14 +217,15 @@ serve(async (req) => {
         });
 
         if (month && year) {
-          const receivedAfter = Math.floor(Date.UTC(year, month - 1, 1, 0, 0, 0) / 1000);
-          const receivedBefore = Math.floor(Date.UTC(year, month, 1, 0, 0, 0) / 1000);
-          params.set("received_after", String(receivedAfter));
-          params.set("received_before", String(receivedBefore));
+          // Search ±1 month around the target accounting period
+          const fromDate = new Date(Date.UTC(year, month - 2, 1, 0, 0, 0)); // 1 month before
+          const toDate = new Date(Date.UTC(year, month + 1, 1, 0, 0, 0));   // 1 month after (exclusive)
+          params.set("received_after", String(Math.floor(fromDate.getTime() / 1000)));
+          params.set("received_before", String(Math.floor(toDate.getTime() / 1000)));
         } else {
-          // Default: scan emails from the last 3 years
-          const threeYearsAgo = Math.floor((Date.now() - 3 * 365 * 24 * 60 * 60 * 1000) / 1000);
-          params.set("received_after", String(threeYearsAgo));
+          // Default: scan emails from the last 3 months
+          const threeMonthsAgo = Math.floor((Date.now() - 3 * 30 * 24 * 60 * 60 * 1000) / 1000);
+          params.set("received_after", String(threeMonthsAgo));
         }
 
         if (nextCursor) {
