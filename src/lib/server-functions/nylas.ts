@@ -161,10 +161,10 @@ export const exchangeNylasCode = createServerFn({ method: "POST" })
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${nylasApiKey}`,
       },
       body: JSON.stringify({
         client_id: nylasClientId,
+        client_secret: nylasApiKey,
         code: data.code,
         redirect_uri: callbackUri,
         grant_type: "authorization_code",
@@ -174,7 +174,7 @@ export const exchangeNylasCode = createServerFn({ method: "POST" })
     if (!tokenResp.ok) {
       const err = await tokenResp.text();
       console.error("[Nylas] Token exchange failed:", tokenResp.status, err);
-      throw new Error("Failed to connect email account");
+      throw new Error(`Failed to connect email account (${tokenResp.status})`);
     }
 
     const tokenData = await tokenResp.json();
