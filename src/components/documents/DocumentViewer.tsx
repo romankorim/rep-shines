@@ -11,7 +11,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Download, ExternalLink, X, Mail, Upload, Building2, FileText, CheckCircle, XCircle, RotateCcw, Pencil, Save } from "lucide-react";
+import { Download, ExternalLink, X, Mail, Upload, Building2, FileText, CheckCircle, XCircle, RotateCcw, Pencil, Save, Sparkles } from "lucide-react";
+import { AiDocumentAssistant } from "@/components/ai/AiDocumentAssistant";
 import { updateDocumentStatus, updateDocumentFields } from "@/lib/server-functions";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -245,6 +246,7 @@ export function DocumentViewer({ document: doc, open, onOpenChange }: DocumentVi
                   <TabsTrigger value="vat" className="text-xs">DPH</TabsTrigger>
                   <TabsTrigger value="accounting" className="text-xs">Účtovanie</TabsTrigger>
                   <TabsTrigger value="source" className="text-xs">Zdroj</TabsTrigger>
+                  <TabsTrigger value="ai" className="text-xs gap-1"><Sparkles className="h-3 w-3" />AI</TabsTrigger>
                 </TabsList>
                 {!editing ? (
                   <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => setEditing(true)}>
