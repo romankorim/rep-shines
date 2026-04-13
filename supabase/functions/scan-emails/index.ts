@@ -221,6 +221,10 @@ serve(async (req) => {
           const receivedBefore = Math.floor(Date.UTC(year, month, 1, 0, 0, 0) / 1000);
           params.set("received_after", String(receivedAfter));
           params.set("received_before", String(receivedBefore));
+        } else {
+          // Default: scan emails from the last 3 years
+          const threeYearsAgo = Math.floor((Date.now() - 3 * 365 * 24 * 60 * 60 * 1000) / 1000);
+          params.set("received_after", String(threeYearsAgo));
         }
 
         if (nextCursor) {
