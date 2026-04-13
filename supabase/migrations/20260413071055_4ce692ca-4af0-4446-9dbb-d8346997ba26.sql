@@ -1,0 +1,1 @@
+ALTER TABLE public.email_integrations ADD CONSTRAINT email_integrations_client_id_office_id_key UNIQUE (client_id, office_id);

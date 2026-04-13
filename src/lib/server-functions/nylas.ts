@@ -155,6 +155,8 @@ export const exchangeNylasCode = createServerFn({ method: "POST" })
 
     const callbackUri = `${getStableAppUrl()}/api/nylas/callback`;
 
+    console.log("[Nylas] Exchanging code for grant, code length:", data.code.length, "clientId:", data.clientId);
+
     const tokenResp = await fetch("https://api.us.nylas.com/v3/connect/token", {
       method: "POST",
       headers: {
@@ -171,13 +173,14 @@ export const exchangeNylasCode = createServerFn({ method: "POST" })
 
     if (!tokenResp.ok) {
       const err = await tokenResp.text();
-      console.error("Nylas token exchange failed:", err);
+      console.error("[Nylas] Token exchange failed:", tokenResp.status, err);
       throw new Error("Failed to connect email account");
     }
 
     const tokenData = await tokenResp.json();
     const grantId = tokenData.grant_id;
     const email = tokenData.email;
+    console.log("[Nylas] Token exchange success, grant_id:", grantId, "email:", email);
 
     if (!grantId) throw new Error("No grant_id returned from Nylas");
 
@@ -189,6 +192,8 @@ export const exchangeNylasCode = createServerFn({ method: "POST" })
 
     if (!client) throw new Error("Client not found");
 
+    console.log("[Nylas] Saving email integration for client:", data.clientId, "grant:", grantId, "email:", email);
+
     const { error: upsertError } = await supabase
       .from("email_integrations")
       .upsert(
@@ -198,21 +203,15 @@ export const exchangeNylasCode = createServerFn({ method: "POST" })
           nylas_grant_id: grantId,
           email_address: email || null,
           provider: tokenData.provider || "unknown",
-          status: "connected",
+          status: "connected" as const,
           last_sync_at: null,
         },
         { onConflict: "client_id,office_id" }
       );
 
     if (upsertError) {
-      await supabase.from("email_integrations").insert({
-        client_id: data.clientId,
-        office_id: client.office_id,
-        nylas_grant_id: grantId,
-        email_address: email || null,
-        provider: tokenData.provider || "unknown",
-        status: "connected",
-      });
+      console.error("[Nylas] Upsert failed:", upsertError);
+      throw new Error("Failed to save email integration: " + upsertError.message);
     }
 
     // Trigger initial scan
