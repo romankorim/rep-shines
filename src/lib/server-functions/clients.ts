@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { createClient } from "@supabase/supabase-js";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
 type DocumentWithPreview = {
@@ -25,7 +25,7 @@ async function attachSignedPreviewUrls(documents: DocumentWithPreview[]) {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceRoleKey) return documents;
 
-  const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+  const supabaseAdmin = createSupabaseClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
