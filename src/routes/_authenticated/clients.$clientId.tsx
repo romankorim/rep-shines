@@ -233,7 +233,7 @@ function ClientDetailPage() {
             <CardContent>
               {connectedEmails.length === 0 ? (
                 <p className="text-xs text-muted-foreground">
-                  Pripojte e-mail pre automatické skenovanie faktúr z príloh.
+                  Pripojte e-mail pre automatické sťahovanie dokladov z príloh.
                 </p>
               ) : (
                 <div className="space-y-2">
