@@ -78,7 +78,7 @@ function ClientDetailPage() {
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const queryClient = useQueryClient();
 
-  // Default to previous month (the month being closed/processed)
+  const now = new Date();
   const defaultDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const [viewYear, setViewYear] = useState(defaultDate.getFullYear());
   const [viewMonth, setViewMonth] = useState(defaultDate.getMonth() + 1);
