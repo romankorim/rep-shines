@@ -2,6 +2,34 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 
+type DocumentWithPreview = {
+  file_url?: string | null;
+  thumbnail_url?: string | null;
+  file_type?: string | null;
+};
+
+async function attachSignedPreviewUrls(supabase: any, documents: DocumentWithPreview[]) {
+  return Promise.all(
+    documents.map(async (doc) => {
+      const nextDoc = { ...doc };
+
+      const candidates = [doc.file_url, doc.thumbnail_url].filter(Boolean) as string[];
+      for (const originalUrl of candidates) {
+        const storagePath = originalUrl.split("/storage/v1/object/public/documents/")[1];
+        if (!storagePath) continue;
+
+        const { data } = await supabase.storage.from("documents").createSignedUrl(storagePath, 60 * 60);
+        if (!data?.signedUrl) continue;
+
+        if (originalUrl === doc.file_url) nextDoc.file_url = data.signedUrl;
+        if (originalUrl === doc.thumbnail_url) nextDoc.thumbnail_url = data.signedUrl;
+      }
+
+      return nextDoc;
+    })
+  );
+}
+
 export const getClients = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -43,13 +71,15 @@ export const getClient = createServerFn({ method: "POST" })
 
     if (clientRes.error) throw new Error(clientRes.error.message);
 
+    const documents = await attachSignedPreviewUrls(supabase, documentsRes.data ?? []);
+
     return {
       client: clientRes.data,
       docCount: docsRes.count ?? 0,
       txCount: txRes.count ?? 0,
       emailIntegrations: emailRes.data ?? [],
       bankIntegration: bankRes.data?.[0] ?? null,
-      documents: documentsRes.data ?? [],
+      documents,
     };
   });
 
