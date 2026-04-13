@@ -205,15 +205,32 @@ serve(async (req) => {
 
         // PDFs are almost always accounting documents, so we accept all PDFs that pass basic checks
 
-        // Check for duplicates
+        // Check for duplicates; on refresh retry failed extractions instead of skipping silently
         const sourceEmailId = `nylas:${msg.id}:${att.id}`;
         const { data: existing } = await supabase
           .from("documents")
-          .select("id")
+          .select("id, status")
           .eq("source_email_id", sourceEmailId)
           .limit(1);
 
-        if (existing && existing.length > 0) continue;
+        if (existing && existing.length > 0) {
+          const existingDoc = existing[0];
+          if (existingDoc.status === "error") {
+            const anonKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY");
+            if (anonKey) {
+              fetch(`${supabaseUrl}/functions/v1/extract-document`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${anonKey}`,
+                },
+                body: JSON.stringify({ documentId: existingDoc.id }),
+              }).catch((err) => console.error("Failed to retry extraction:", err));
+              processedCount++;
+            }
+          }
+          continue;
+        }
 
         // Download attachment from Nylas
         const dlResp = await fetch(

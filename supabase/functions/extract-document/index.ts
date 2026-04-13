@@ -39,10 +39,9 @@ serve(async (req) => {
       });
     }
 
-    // Get a signed URL for private bucket
+    // Get a signed URL for the private documents bucket
     let fileUrl = doc.file_url;
-    if (doc.file_url && doc.file_url.includes("/storage/v1/object/public/")) {
-      // Try to create a signed URL for better access
+    if (doc.file_url && doc.file_url.includes("/storage/v1/object/public/documents/")) {
       const storagePath = doc.file_url.split("/storage/v1/object/public/documents/")[1];
       if (storagePath) {
         const { data: signedData } = await supabase.storage
@@ -54,10 +53,7 @@ serve(async (req) => {
       }
     }
 
-    // For images, download and encode as base64
-    let imageContent: { type: "image_url"; image_url: { url: string } } | null = null;
-    let pdfContent: { type: "text"; text: string } | null = null;
-
+    let fileContent: any = null;
     const isImage = doc.file_type?.startsWith("image/");
     const isPdf = doc.file_type === "application/pdf";
 
@@ -65,45 +61,48 @@ serve(async (req) => {
       try {
         const imgResp = await fetch(fileUrl);
         if (imgResp.ok) {
-          const buf = await imgResp.arrayBuffer();
-          const base64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
-          const mimeType = doc.file_type || "image/jpeg";
-          imageContent = {
+          const bytes = new Uint8Array(await imgResp.arrayBuffer());
+          let binary = "";
+          const chunkSize = 0x8000;
+          for (let i = 0; i < bytes.length; i += chunkSize) {
+            binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+          }
+
+          fileContent = {
             type: "image_url",
-            image_url: { url: `data:${mimeType};base64,${base64}` },
+            image_url: { url: `data:${doc.file_type || "image/jpeg"};base64,${btoa(binary)}` },
           };
         }
       } catch (e) {
         console.error("Failed to download image:", e);
       }
     } else if (isPdf && fileUrl) {
-      // For PDFs, we'll pass the URL and let Gemini handle it
-      imageContent = {
-        type: "image_url",
-        image_url: { url: fileUrl },
+      fileContent = {
+        type: "input_file",
+        file_url: fileUrl,
       };
     }
 
     const systemPrompt = `Si expert na extrahovanie dát z účtovných dokladov (faktúry, účtenky, dobropisy) pre slovenské a české firmy.
 
-Analyzuj priložený doklad a extrahuj VŠETKY dostupné údaje. Použi tool calling na vrátenie štruktúrovaných dát.
+    Analyzuj priložený doklad a extrahuj VŠETKY dostupné údaje. Použi tool calling na vrátenie štruktúrovaných dát.
 
-Pravidlá:
-- Dátumy formátuj ako YYYY-MM-DD
-- Sumy ako čísla (bez meny a medzier)
-- IČO, DIČ, IČ DPH presne ako na doklade
-- Ak údaj nie je na doklade, vráť null
-- confidence je 0-100, podľa čitateľnosti a úplnosti
-- document_type: received_invoice (prijatá faktúra), issued_invoice (vydaná), receipt (účtenka/pokladničný blok), credit_note (dobropis), advance_invoice (zálohová), bank_statement (výpis), other
-- vat_breakdown: pole objektov {rate, base, vat, total} pre každú sadzbu DPH na doklade
-- Sadzby DPH na SK: 20%, 10%, 5%; CZ: 21%, 12%`;
+    Pravidlá:
+    - Dátumy formátuj ako YYYY-MM-DD
+    - Sumy ako čísla (bez meny a medzier)
+    - IČO, DIČ, IČ DPH presne ako na doklade
+    - Ak údaj nie je na doklade, vráť null
+    - confidence je 0-100, podľa čitateľnosti a úplnosti
+    - document_type: received_invoice (prijatá faktúra), issued_invoice (vydaná), receipt (účtenka/pokladničný blok), credit_note (dobropis), advance_invoice (zálohová), bank_statement (výpis), other
+    - vat_breakdown: pole objektov {rate, base, vat, total} pre každú sadzbu DPH na doklade
+    - Sadzby DPH na SK: 20%, 10%, 5%; CZ: 21%, 12%`;
 
     const userMessage: any[] = [
       { type: "text", text: `Extrahuj všetky dáta z tohto dokladu. Súbor: ${doc.file_name || "unknown"}` },
     ];
 
-    if (imageContent) {
-      userMessage.push(imageContent);
+    if (fileContent) {
+      userMessage.push(fileContent);
     } else {
       userMessage.push({ type: "text", text: "[Súbor nie je dostupný pre vizuálnu analýzu. Extrahuj čo sa dá z názvu súboru.]" });
     }
