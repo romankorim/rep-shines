@@ -12,6 +12,7 @@ import {
   exchangeNylasCode,
   triggerEmailScan,
   disconnectEmail,
+  resetEmailSyncPeriod,
   moveDocumentPeriod,
 } from "@/lib/server-functions";
 import {
@@ -313,6 +314,33 @@ function ClientDetailPage() {
                             }}
                           >
                             <RefreshCw className={`h-3 w-3 ${scanning ? "animate-spin" : ""}`} />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6 shrink-0 text-destructive hover:text-destructive"
+                            title="Vymazať import tohto mesiaca a spraviť novú extrakciu"
+                            disabled={scanning}
+                            onClick={async () => {
+                              const confirmed = window.confirm(
+                                `Vymazať importované emailové doklady za ${MONTH_NAMES[viewMonth - 1].toLowerCase()} ${viewYear} a načítať ich znova? Emaily v schránke sa tým nemažú.`
+                              );
+                              if (!confirmed) return;
+
+                              setScanning(true);
+                              try {
+                                const resetResult = await resetEmailSyncPeriod({ data: { clientId, month: viewMonth, year: viewYear } });
+                                const scanResult = await triggerEmailScan({ data: { clientId, month: viewMonth, year: viewYear } });
+                                queryClient.invalidateQueries({ queryKey: ["client", clientId] });
+                                toast.success(`Reset: ${resetResult.deleted} zmazaných importov, nová synchronizácia: ${scanResult.processed} dokladov`);
+                              } catch {
+                                toast.error("Nepodarilo sa spraviť reset a novú extrakciu")
+                              } finally {
+                                setScanning(false);
+                              }
+                            }}
+                          >
+                            <Trash2 className="h-3 w-3" />
                           </Button>
                           <Button
                             size="icon"

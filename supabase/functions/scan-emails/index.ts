@@ -178,107 +178,6 @@ Pravidlá:
   }
 }
 
-/**
- * Batch-classify multiple attachments from the same email in one AI call.
- */
-async function classifyAttachmentsBatch(
-  attachments: Array<{ filename: string; content_type: string; size: number; id: string }>,
-  emailSubject: string,
-  emailFrom: string,
-  lovableApiKey: string,
-): Promise<Map<string, { relevant: boolean; reason: string }>> {
-  const results = new Map<string, { relevant: boolean; reason: string }>();
-
-  if (attachments.length === 0) return results;
-
-  // For a single attachment, use the simple call
-  if (attachments.length === 1) {
-    const att = attachments[0];
-    const result = await classifyAttachmentWithAI(att, emailSubject, emailFrom, lovableApiKey);
-    results.set(att.id, result);
-    return results;
-  }
-
-  // For multiple attachments, batch them in one prompt
-  const attachmentList = attachments
-    .map((a, i) => `${i + 1}. Súbor: "${a.filename || "(bez názvu)"}", Typ: "${a.content_type}", Veľkosť: ${a.size || 0}B`)
-    .join("\n");
-
-  const prompt = `Si AI agent pre účtovnícku firmu. Rozhodneš, ktoré prílohy e-mailu sú účtovné doklady.
-
-E-mail:
-- Predmet: "${emailSubject || "(žiadny)"}"
-- Odosielateľ: "${emailFrom || "(neznámy)"}"
-
-Prílohy:
-${attachmentList}
-
-Pre KAŽDÚ prílohu rozhodneš či je relevantná pre účtovníctvo (faktúra, účtenka, dobropis, výpis, zmluva, poistka, daňový doklad, mzdový doklad, avízo, zálohová faktúra, proforma, dodací list, objednávka, potvrdenie platby, alebo iný finančný/účtovný dokument).
-
-Odpovedz IBA v JSON formáte:
-{"results": [{"index": 1, "relevant": true/false, "reason": "..."}]}
-
-Pravidlá:
-- PDF → takmer vždy relevant=true (pokiaľ to nie je zjavne prezentácia/návod/marketing)
-- Obrázky s účtovným kontextom (fotka účtenky, scan faktúry) → relevant=true
-- Logá, podpisy, screenshoty, profilové obrázky, marketingové materiály → relevant=false
-- Ak si nie si istý → relevant=true (radšej zahrnieš než vynecháš)`;
-
-  try {
-    const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${lovableApiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-pro",
-        messages: [{ role: "user", content: prompt }],
-        response_format: { type: "json_object" },
-      }),
-    });
-
-    if (!resp.ok) {
-      // Default: accept all
-      for (const att of attachments) {
-        results.set(att.id, { relevant: true, reason: "AI unavailable, accepting by default" });
-      }
-      return results;
-    }
-
-    const result = await resp.json();
-    const content = result.choices?.[0]?.message?.content;
-    const parsed = JSON.parse(content || "{}");
-
-    if (parsed.results && Array.isArray(parsed.results)) {
-      for (const r of parsed.results) {
-        const idx = (r.index || 1) - 1;
-        if (idx >= 0 && idx < attachments.length) {
-          results.set(attachments[idx].id, {
-            relevant: Boolean(r.relevant),
-            reason: r.reason || "",
-          });
-        }
-      }
-    }
-
-    // Fill in any missing results as relevant (safe default)
-    for (const att of attachments) {
-      if (!results.has(att.id)) {
-        results.set(att.id, { relevant: true, reason: "Not classified, accepting by default" });
-      }
-    }
-
-    return results;
-  } catch (e) {
-    console.error("Batch AI classify error:", e);
-    for (const att of attachments) {
-      results.set(att.id, { relevant: true, reason: "AI error, accepting by default" });
-    }
-    return results;
-  }
-}
-
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -386,29 +285,36 @@ serve(async (req) => {
 
       if (candidateAttachments.length === 0) continue;
 
-      // Step 2: AI classification for all candidates in this email
-      const classifications = await classifyAttachmentsBatch(
-        candidateAttachments.map((a: any) => ({
-          filename: a.filename || "",
-          content_type: a.content_type || "",
-          size: a.size || 0,
-          id: a.id,
-        })),
-        emailSubject,
-        emailFrom,
-        lovableApiKey,
-      );
-
-      // Step 3: Process relevant attachments
+      // Step 2: Process every candidate using the actual file content.
+      // This avoids false negatives from generic subjects/filenames.
       for (const att of candidateAttachments) {
-        const classification = classifications.get(att.id);
-        if (!classification?.relevant) {
-          console.log(`AI skip: ${att.filename} — ${classification?.reason}`);
-          skippedCount++;
+        const normalizedMimeType = normalizeMimeType(att.content_type);
+        const filename = att.filename || "";
+
+        const dlResp = await fetch(
+          `${NYLAS_API}/grants/${grantId}/attachments/${att.id}/download?message_id=${msg.id}`,
+          { headers: { Authorization: `Bearer ${nylasApiKey}` } },
+        );
+
+        if (!dlResp.ok) {
+          console.error(`Failed to download attachment ${att.id}:`, dlResp.status);
           continue;
         }
 
-        // Check for duplicates; on refresh retry failed extractions
+        const fileBuffer = await dlResp.arrayBuffer();
+        const fileBytes = new Uint8Array(fileBuffer);
+        const visualClassification = await classifyAttachmentByContent(
+          {
+            filename,
+            content_type: normalizedMimeType,
+            size: att.size || fileBytes.length,
+            bytes: fileBytes,
+          },
+          emailSubject,
+          emailFrom,
+          lovableApiKey,
+        );
+
         const sourceEmailId = `nylas:${msg.id}:${att.id}`;
         const { data: existing } = await supabase
           .from("documents")
@@ -418,6 +324,37 @@ serve(async (req) => {
 
         if (existing && existing.length > 0) {
           const existingDoc = existing[0];
+          if (!visualClassification.relevant) {
+            console.log(`AI skip existing: ${filename} — ${visualClassification.reason}`);
+            await supabase
+              .from("documents")
+              .update({
+                status: "rejected",
+                document_type: null,
+                supplier_name: null,
+                supplier_ico: null,
+                supplier_dic: null,
+                supplier_ic_dph: null,
+                document_number: null,
+                variable_symbol: null,
+                issue_date: null,
+                due_date: null,
+                delivery_date: null,
+                total_amount: null,
+                currency: null,
+                tax_base: null,
+                vat_amount: null,
+                vat_rate: null,
+                vat_breakdown: null,
+                expense_category: null,
+                ai_confidence: 0,
+                ai_raw_data: { reason: visualClassification.reason, filtered_by_agent: true },
+              })
+              .eq("id", existingDoc.id);
+            skippedCount++;
+            continue;
+          }
+
           if (existingDoc.status === "error") {
             const anonKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY");
             if (anonKey) {
@@ -432,100 +369,18 @@ serve(async (req) => {
               if (!retryResp.ok) console.error("Retry extraction failed:", existingDoc.id, retryResp.status, await retryResp.text());
               processedCount++;
             }
-          } else if (["pending_approval", "approved", "rejected"].includes(existingDoc.status)) {
-            const normalizedMimeType = normalizeMimeType(att.content_type);
-            const canInspectVisually = normalizedMimeType === "application/pdf" || normalizedMimeType.startsWith("image/");
-
-            if (canInspectVisually) {
-              const dlResp = await fetch(
-                `${NYLAS_API}/grants/${grantId}/attachments/${att.id}/download?message_id=${msg.id}`,
-                { headers: { Authorization: `Bearer ${nylasApiKey}` } },
-              );
-
-              if (dlResp.ok) {
-                const fileBuffer = await dlResp.arrayBuffer();
-                const fileBytes = new Uint8Array(fileBuffer);
-                const review = await classifyAttachmentByContent(
-                  {
-                    filename: att.filename || "",
-                    content_type: normalizedMimeType,
-                    size: att.size || fileBytes.length,
-                    bytes: fileBytes,
-                  },
-                  emailSubject,
-                  emailFrom,
-                  lovableApiKey,
-                );
-
-                if (!review.relevant) {
-                  await supabase
-                    .from("documents")
-                    .update({
-                      status: "rejected",
-                      document_type: null,
-                      supplier_name: null,
-                      supplier_ico: null,
-                      supplier_dic: null,
-                      supplier_ic_dph: null,
-                      document_number: null,
-                      variable_symbol: null,
-                      issue_date: null,
-                      due_date: null,
-                      delivery_date: null,
-                      total_amount: null,
-                      currency: null,
-                      tax_base: null,
-                      vat_amount: null,
-                      vat_rate: null,
-                      vat_breakdown: null,
-                      expense_category: null,
-                      ai_confidence: 0,
-                      ai_raw_data: { reason: review.reason, filtered_by_agent: true },
-                    })
-                    .eq("id", existingDoc.id);
-                  skippedCount++;
-                }
-              }
-            }
           }
           continue;
         }
 
-        // Download attachment from Nylas
-        const dlResp = await fetch(
-          `${NYLAS_API}/grants/${grantId}/attachments/${att.id}/download?message_id=${msg.id}`,
-          { headers: { Authorization: `Bearer ${nylasApiKey}` } },
-        );
-
-        if (!dlResp.ok) {
-          console.error(`Failed to download attachment ${att.id}:`, dlResp.status);
-          continue;
-        }
-
-        const fileBuffer = await dlResp.arrayBuffer();
-        const fileBytes = new Uint8Array(fileBuffer);
-        const filename = att.filename || "";
-        const ext = filename.split(".").pop() || "pdf";
-        const storagePath = `${clientId}/${Date.now()}_email_${Math.random().toString(36).slice(2)}.${ext}`;
-        const normalizedMimeType = normalizeMimeType(att.content_type);
-
-        const visualClassification = await classifyAttachmentByContent(
-          {
-            filename,
-            content_type: normalizedMimeType,
-            size: att.size || fileBytes.length,
-            bytes: fileBytes,
-          },
-          emailSubject,
-          emailFrom,
-          lovableApiKey,
-        );
-
         if (!visualClassification.relevant) {
-          console.log(`AI skip after visual inspection: ${filename} — ${visualClassification.reason}`);
+          console.log(`AI skip: ${filename} — ${visualClassification.reason}`);
           skippedCount++;
           continue;
         }
+
+        const ext = filename.split(".").pop() || "pdf";
+        const storagePath = `${clientId}/${Date.now()}_email_${Math.random().toString(36).slice(2)}.${ext}`;
 
         console.log(`AI accepted: ${filename} — ${visualClassification.reason} (${visualClassification.signal})`);
 
