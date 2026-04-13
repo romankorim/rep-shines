@@ -21,28 +21,34 @@ function getDocumentsStoragePath(url?: string | null) {
 }
 
 async function attachSignedPreviewUrls(documents: DocumentWithPreview[]) {
-  return Promise.all(
-    documents.map(async (doc) => {
-      const nextDoc = { ...doc };
-      const candidates = [doc.file_url, doc.thumbnail_url].filter(Boolean) as string[];
+  try {
+    return await Promise.all(
+      documents.map(async (doc) => {
+        const nextDoc = { ...doc };
+        const candidates = [doc.file_url, doc.thumbnail_url].filter(Boolean) as string[];
 
-      for (const originalUrl of candidates) {
-        const storagePath = getDocumentsStoragePath(originalUrl);
-        if (!storagePath) continue;
+        for (const originalUrl of candidates) {
+          const storagePath = getDocumentsStoragePath(originalUrl);
+          if (!storagePath) continue;
 
-        const { data, error } = await supabaseAdmin.storage.from("documents").createSignedUrl(storagePath, 60 * 60);
-        if (error) {
-          console.error("Signed URL error:", error.message, "path:", storagePath);
+          try {
+            const { data } = await supabaseAdmin.storage.from("documents").createSignedUrl(storagePath, 60 * 60);
+            if (!data?.signedUrl) continue;
+
+            if (originalUrl === doc.file_url) nextDoc.file_url = data.signedUrl;
+            if (originalUrl === doc.thumbnail_url) nextDoc.thumbnail_url = data.signedUrl;
+          } catch {
+            // Signed URL generation failed, keep original URL
+          }
         }
-        if (!data?.signedUrl) continue;
 
-        if (originalUrl === doc.file_url) nextDoc.file_url = data.signedUrl;
-        if (originalUrl === doc.thumbnail_url) nextDoc.thumbnail_url = data.signedUrl;
-      }
-
-      return nextDoc;
-    })
-  );
+        return nextDoc;
+      })
+    );
+  } catch {
+    // supabaseAdmin not available (missing env vars), return docs as-is
+    return documents;
+  }
 }
 
 export const getClients = createServerFn({ method: "GET" })
