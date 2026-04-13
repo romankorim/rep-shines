@@ -206,7 +206,7 @@ export const exchangeNylasCode = createServerFn({ method: "POST" })
           status: "connected" as const,
           last_sync_at: null,
         },
-        { onConflict: "client_id,office_id" }
+        { onConflict: "client_id" }
       );
 
     if (upsertError) {
