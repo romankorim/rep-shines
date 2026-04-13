@@ -7,7 +7,8 @@ import {
 } from "lucide-react";
 import { useState, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getPortalStats, getPortalDocumentsByMonth, createDocumentRecord } from "@/lib/server-functions";
+import { getPortalStats, createDocumentRecord } from "@/lib/server-functions";
+import { getPortalDocumentsByMonth } from "@/lib/server-functions/portal";
 import { getNylasConnectUrl } from "@/lib/server-functions/nylas";
 import { initBankConnection } from "@/lib/server-functions/bank";
 import { supabase } from "@/integrations/supabase/client";
