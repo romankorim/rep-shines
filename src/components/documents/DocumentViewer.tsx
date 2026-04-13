@@ -92,6 +92,7 @@ export function DocumentViewer({ document: doc, open, onOpenChange }: DocumentVi
   // Sync state when doc changes
   useEffect(() => {
     if (doc) {
+      setDocumentType(doc.document_type || "");
       setAccountantNotes(doc.accountant_notes || "");
       setExpenseCategory(doc.expense_category || "");
       setAccountingCode(doc.accounting_code || "");
@@ -130,6 +131,7 @@ export function DocumentViewer({ document: doc, open, onOpenChange }: DocumentVi
       await updateDocumentFields({
         data: {
           documentId: doc.id,
+          documentType: documentType as any || undefined,
           supplierName: supplierName || undefined,
           supplierIco: supplierIco || undefined,
           supplierDic: supplierDic || undefined,
