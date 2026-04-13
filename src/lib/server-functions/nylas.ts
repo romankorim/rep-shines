@@ -5,7 +5,11 @@ import { z } from "zod";
 // Generate Nylas OAuth connect URL for a client
 export const getNylasConnectUrl = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({ clientId: z.string().uuid() }))
+  .inputValidator(z.object({
+    clientId: z.string().uuid(),
+    provider: z.enum(["google", "microsoft", "imap"]).optional(),
+    loginHint: z.string().email().optional(),
+  }))
   .handler(async ({ data, context }) => {
     const clientId = process.env.NYLAS_CLIENT_ID;
     if (!clientId) throw new Error("NYLAS_CLIENT_ID not configured");
@@ -19,7 +23,21 @@ export const getNylasConnectUrl = createServerFn({ method: "POST" })
     authUrl.searchParams.set("response_type", "code");
     authUrl.searchParams.set("access_type", "offline");
     authUrl.searchParams.set("state", data.clientId);
-    authUrl.searchParams.set("scope", "https://www.googleapis.com/auth/gmail.readonly,https://graph.microsoft.com/Mail.Read");
+
+    // Minimal scopes - only email reading and attachments
+    if (data.provider === "google") {
+      authUrl.searchParams.set("provider", "google");
+      authUrl.searchParams.set("scope", "https://www.googleapis.com/auth/gmail.readonly");
+      if (data.loginHint) authUrl.searchParams.set("login_hint", data.loginHint);
+    } else if (data.provider === "microsoft") {
+      authUrl.searchParams.set("provider", "microsoft");
+      authUrl.searchParams.set("scope", "https://graph.microsoft.com/Mail.Read");
+      if (data.loginHint) authUrl.searchParams.set("login_hint", data.loginHint);
+    } else {
+      // IMAP - Nylas handles IMAP natively
+      authUrl.searchParams.set("provider", "imap");
+      if (data.loginHint) authUrl.searchParams.set("login_hint", data.loginHint);
+    }
 
     return { url: authUrl.toString() };
   });
