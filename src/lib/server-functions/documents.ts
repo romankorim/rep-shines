@@ -2,6 +2,28 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 
+async function attachSignedPreviewUrls(supabase: any, documents: any[]) {
+  return Promise.all(
+    documents.map(async (doc) => {
+      const nextDoc = { ...doc };
+      const candidates = [doc.file_url, doc.thumbnail_url].filter(Boolean) as string[];
+
+      for (const originalUrl of candidates) {
+        const storagePath = originalUrl.split("/storage/v1/object/public/documents/")[1];
+        if (!storagePath) continue;
+
+        const { data } = await supabase.storage.from("documents").createSignedUrl(storagePath, 60 * 60);
+        if (!data?.signedUrl) continue;
+
+        if (originalUrl === doc.file_url) nextDoc.file_url = data.signedUrl;
+        if (originalUrl === doc.thumbnail_url) nextDoc.thumbnail_url = data.signedUrl;
+      }
+
+      return nextDoc;
+    })
+  );
+}
+
 export const getDocuments = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -23,7 +45,7 @@ export const getDocuments = createServerFn({ method: "GET" })
       .order("created_at", { ascending: false });
 
     if (error) throw new Error(error.message);
-    return data ?? [];
+    return attachSignedPreviewUrls(supabase, data ?? []);
   });
 
 export const updateDocumentStatus = createServerFn({ method: "POST" })

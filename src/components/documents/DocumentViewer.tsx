@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Download, X, Mail, Upload, Building2, FileText, CheckCircle, XCircle, RotateCcw, Pencil, Save } from "lucide-react";
+import { Download, ExternalLink, X, Mail, Upload, Building2, FileText, CheckCircle, XCircle, RotateCcw, Pencil, Save } from "lucide-react";
 import { updateDocumentStatus, updateDocumentFields } from "@/lib/server-functions";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -73,7 +73,6 @@ export function DocumentViewer({ document: doc, open, onOpenChange }: DocumentVi
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(false);
 
-  // Editable fields
   const [documentType, setDocumentType] = useState("");
   const [supplierName, setSupplierName] = useState("");
   const [supplierIco, setSupplierIco] = useState("");
@@ -89,7 +88,6 @@ export function DocumentViewer({ document: doc, open, onOpenChange }: DocumentVi
   const [vatAmount, setVatAmount] = useState("");
   const [vatRate, setVatRate] = useState("");
 
-  // Sync state when doc changes
   useEffect(() => {
     if (doc) {
       setDocumentType(doc.document_type || "");
@@ -118,6 +116,12 @@ export function DocumentViewer({ document: doc, open, onOpenChange }: DocumentVi
   const status = statusConfig[doc.status] || { label: doc.status, class: "bg-muted text-muted-foreground" };
   const source = sourceLabels[doc.source] || { label: doc.source, icon: FileText };
   const SourceIcon = source.icon;
+  const previewUrl = doc.file_url || doc.thumbnail_url;
+  const isPdf = doc.file_type?.includes("pdf");
+  const isImage = doc.file_type?.startsWith("image/");
+  const hasExtractedData = Boolean(
+    doc.document_type || doc.supplier_name || doc.document_number || doc.issue_date || doc.total_amount || doc.ai_raw_data
+  );
 
   const overduedays = doc.due_date && new Date(doc.due_date) < new Date() && doc.status !== "approved"
     ? Math.ceil((new Date().getTime() - new Date(doc.due_date).getTime()) / (1000 * 60 * 60 * 24))
@@ -180,7 +184,6 @@ export function DocumentViewer({ document: doc, open, onOpenChange }: DocumentVi
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-6xl w-[95vw] h-[90vh] p-0 gap-0 rounded-none">
         <div className="flex h-full">
-          {/* Left panel - Preview */}
           <div className="flex-[3] bg-muted/20 flex flex-col border-r border-border">
             <div className="flex items-center justify-between p-3 border-b border-border">
               <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-medium rounded-none ${status.class}`}>
@@ -191,29 +194,34 @@ export function DocumentViewer({ document: doc, open, onOpenChange }: DocumentVi
               </button>
             </div>
             <div className="flex-1 flex items-center justify-center p-6">
-              {doc.file_url ? (
-                doc.file_type?.includes("pdf") ? (
-                  <iframe src={doc.file_url} className="w-full h-full border-0" title="Document preview" />
-                ) : doc.file_type?.startsWith("image/") ? (
-                  <img src={doc.file_url} alt={doc.file_name || "Document"} className="max-w-full max-h-full object-contain" />
+              {previewUrl ? (
+                isPdf ? (
+                  <iframe src={previewUrl} className="h-full w-full border-0 bg-background" title="Document preview" />
+                ) : isImage ? (
+                  <img src={previewUrl} alt={doc.file_name || "Document"} className="max-w-full max-h-full object-contain" />
                 ) : (
                   <div className="text-center">
-                    <FileText className="h-16 w-16 text-muted-foreground mx-auto mb-3" />
+                    <FileText className="mx-auto mb-3 h-16 w-16 text-muted-foreground" />
                     <p className="text-sm text-muted-foreground">{doc.file_name}</p>
                   </div>
                 )
               ) : (
-                <div className="text-center">
-                  <FileText className="h-16 w-16 text-muted-foreground mx-auto mb-3" />
+                <div className="space-y-3 text-center">
+                  <FileText className="mx-auto h-16 w-16 text-muted-foreground" />
                   <p className="text-sm text-muted-foreground">Náhľad nie je k dispozícii</p>
                 </div>
               )}
             </div>
-            {doc.file_url && (
-              <div className="p-3 border-t border-border">
+            {previewUrl && (
+              <div className="flex items-center gap-2 border-t border-border p-3">
                 <Button variant="outline" size="sm" asChild>
-                  <a href={doc.file_url} download={doc.file_name}>
-                    <Download className="h-3.5 w-3.5 mr-1" /> Stiahnuť
+                  <a href={previewUrl} target="_blank" rel="noreferrer">
+                    <ExternalLink className="mr-1 h-3.5 w-3.5" /> Otvoriť
+                  </a>
+                </Button>
+                <Button variant="outline" size="sm" asChild>
+                  <a href={previewUrl} download={doc.file_name}>
+                    <Download className="mr-1 h-3.5 w-3.5" /> Stiahnuť
                   </a>
                 </Button>
               </div>
@@ -243,7 +251,11 @@ export function DocumentViewer({ document: doc, open, onOpenChange }: DocumentVi
 
               <div className="flex-1 overflow-y-auto">
                 <TabsContent value="details" className="p-4 space-y-4 mt-0">
-                  {/* Document type */}
+                  {!hasExtractedData && doc.status === "error" && (
+                    <div className="border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
+                      AI extrakcia tohto PDF zlyhala, ale doklad už sa dá otvoriť a polia môžete upraviť ručne.
+                    </div>
+                  )}
                   <div>
                     <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Druh dokladu</Label>
                     {editing ? (
