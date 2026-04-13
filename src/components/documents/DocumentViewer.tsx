@@ -480,6 +480,10 @@ export function DocumentViewer({ document: doc, open, onOpenChange }: DocumentVi
                     </div>
                   )}
                 </TabsContent>
+
+                <TabsContent value="ai" className="mt-0 flex-1 flex flex-col min-h-0" style={{ height: "calc(100% - 2rem)" }}>
+                  <AiDocumentAssistant document={doc} />
+                </TabsContent>
               </div>
             </Tabs>
 
