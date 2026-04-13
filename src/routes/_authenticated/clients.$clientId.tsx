@@ -82,7 +82,6 @@ function ClientDetailPage() {
   const defaultDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const [viewYear, setViewYear] = useState(defaultDate.getFullYear());
   const [viewMonth, setViewMonth] = useState(defaultDate.getMonth() + 1);
-  const [initialPeriodSet, setInitialPeriodSet] = useState(false);
 
   // Handle Nylas OAuth callback
   useEffect(() => {
