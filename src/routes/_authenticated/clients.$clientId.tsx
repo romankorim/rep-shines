@@ -208,15 +208,16 @@ function ClientDetailPage() {
   const handleRefreshMonth = useCallback(async () => {
     setScanning(true);
     try {
-      const result = await triggerEmailScan({ data: { clientId, month: viewMonth, year: viewYear } });
+      // Scan ALL emails (no month/year filter) so historical documents are found
+      const result = await triggerEmailScan({ data: { clientId } });
       await invalidateDocumentQueries();
-      toast.success(`Sync ${MONTH_NAMES[viewMonth - 1].toLowerCase()} ${viewYear}: ${result.processed} importovaných alebo aktualizovaných, ${result.skipped ?? 0} preskočených`);
+      toast.success(`Sync: ${result.processed} importovaných alebo aktualizovaných, ${result.skipped ?? 0} preskočených`);
     } catch (error) {
       toast.error(getErrorMessage(error, "Nepodarilo sa synchronizovať e-maily"));
     } finally {
       setScanning(false);
     }
-  }, [clientId, invalidateDocumentQueries, viewMonth, viewYear]);
+  }, [clientId, invalidateDocumentQueries]);
 
   const handleDeleteDocuments = useCallback(async () => {
     const targetDocIds = selectedCurrentPeriodIds.length > 0 ? selectedCurrentPeriodIds : currentPeriodDocIds;
