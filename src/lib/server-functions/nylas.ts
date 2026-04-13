@@ -189,6 +189,8 @@ export const exchangeNylasCode = createServerFn({ method: "POST" })
 
     if (!client) throw new Error("Client not found");
 
+    console.log("[Nylas] Saving email integration for client:", data.clientId, "grant:", grantId, "email:", email);
+
     const { error: upsertError } = await supabase
       .from("email_integrations")
       .upsert(
@@ -198,21 +200,15 @@ export const exchangeNylasCode = createServerFn({ method: "POST" })
           nylas_grant_id: grantId,
           email_address: email || null,
           provider: tokenData.provider || "unknown",
-          status: "connected",
+          status: "connected" as const,
           last_sync_at: null,
         },
         { onConflict: "client_id,office_id" }
       );
 
     if (upsertError) {
-      await supabase.from("email_integrations").insert({
-        client_id: data.clientId,
-        office_id: client.office_id,
-        nylas_grant_id: grantId,
-        email_address: email || null,
-        provider: tokenData.provider || "unknown",
-        status: "connected",
-      });
+      console.error("[Nylas] Upsert failed:", upsertError);
+      throw new Error("Failed to save email integration: " + upsertError.message);
     }
 
     // Trigger initial scan
