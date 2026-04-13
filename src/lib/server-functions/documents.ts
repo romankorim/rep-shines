@@ -14,7 +14,10 @@ function getDocumentsStoragePath(url?: string | null) {
   return null;
 }
 
-async function attachSignedPreviewUrls(documents: any[]) {
+async function attachSignedPreviewUrls(
+  documents: any[],
+  createSignedUrl?: (path: string, expiresIn: number) => Promise<{ data?: { signedUrl?: string | null } | null }>
+) {
   return Promise.all(
     documents.map(async (doc) => {
       const nextDoc = { ...doc };
@@ -24,7 +27,10 @@ async function attachSignedPreviewUrls(documents: any[]) {
         const storagePath = getDocumentsStoragePath(originalUrl);
         if (!storagePath) continue;
 
-        const { data } = await supabaseAdmin.storage.from("documents").createSignedUrl(storagePath, 60 * 60);
+        const signedUrlResult = createSignedUrl
+          ? await createSignedUrl(storagePath, 60 * 60)
+          : await supabaseAdmin.storage.from("documents").createSignedUrl(storagePath, 60 * 60);
+        const data = signedUrlResult?.data;
         if (!data?.signedUrl) continue;
 
         if (originalUrl === doc.file_url) nextDoc.file_url = data.signedUrl;
@@ -57,7 +63,19 @@ export const getDocuments = createServerFn({ method: "GET" })
       .order("created_at", { ascending: false });
 
     if (error) throw new Error(error.message);
-    return attachSignedPreviewUrls(data ?? []);
+    return attachSignedPreviewUrls(
+      data ?? [],
+      async (storagePath, expiresIn) => {
+        try {
+          const result = await supabase.storage.from("documents").createSignedUrl(storagePath, expiresIn);
+          if (result.data?.signedUrl) return result;
+        } catch {
+          // fall back to admin client
+        }
+
+        return supabaseAdmin.storage.from("documents").createSignedUrl(storagePath, expiresIn);
+      }
+    );
   });
 
 export const updateDocumentStatus = createServerFn({ method: "POST" })
