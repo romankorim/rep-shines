@@ -4,16 +4,17 @@ import { Button } from "@/components/ui/button";
 import {
   Mail, Building2, Loader2, CheckCircle, Upload, Camera,
   ChevronLeft, ChevronRight, FileText, AlertCircle, Check,
+  Plus, GripVertical, Trash2, RefreshCw,
 } from "lucide-react";
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getPortalStats, createDocumentRecord } from "@/lib/server-functions";
+import { getPortalStats, createDocumentRecord, moveDocumentPeriod, triggerEmailScan, disconnectEmail } from "@/lib/server-functions";
 import { getPortalDocumentsByMonth } from "@/lib/server-functions/portal";
-import { getNylasConnectUrl } from "@/lib/server-functions/nylas";
 import { initBankConnection } from "@/lib/server-functions/bank";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { PortalLayout } from "@/components/layout/PortalLayout";
+import { EmailConnectDialog } from "@/components/email/EmailConnectDialog";
 
 export const Route = createFileRoute("/_authenticated/portal/")({
   component: PortalDashboard,
@@ -45,10 +46,11 @@ function PortalDashboard() {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
-  const [connectingEmail, setConnectingEmail] = useState(false);
   const [connectingBank, setConnectingBank] = useState(false);
   const [files, setFiles] = useState<FileItem[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [emailDialogOpen, setEmailDialogOpen] = useState(false);
+  const [draggedDocId, setDraggedDocId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
 
@@ -62,7 +64,23 @@ function PortalDashboard() {
     queryFn: () => getPortalDocumentsByMonth({ data: { year, month } }),
   });
 
+  // Fetch connected email integrations
+  const { data: emailIntegrations = [] } = useQuery({
+    queryKey: ["portal-email-integrations"],
+    queryFn: async () => {
+      if (!stats?.clientId) return [];
+      const { data } = await supabase
+        .from("email_integrations")
+        .select("*")
+        .eq("client_id", stats.clientId)
+        .order("created_at", { ascending: false });
+      return data ?? [];
+    },
+    enabled: !!stats?.clientId,
+  });
+
   const clientId = stats?.clientId;
+  const connectedEmails = emailIntegrations.filter((e: any) => e.status === "connected");
 
   function prevMonth() {
     if (month === 1) { setMonth(12); setYear(y => y - 1); }
@@ -73,17 +91,15 @@ function PortalDashboard() {
     else setMonth(m => m + 1);
   }
 
-  const handleConnectEmail = async () => {
-    if (!clientId) { toast.error("Najskôr musíte byť priradený ku klientovi"); return; }
-    setConnectingEmail(true);
+  const handleDropOnPeriod = useCallback(async (docId: string, targetMonth: number, targetYear: number) => {
     try {
-      const result = await getNylasConnectUrl({ data: { clientId } });
-      if (result?.url) window.open(result.url, "_blank", "noopener");
-      else toast.error("Nepodarilo sa získať odkaz na pripojenie emailu");
-    } catch (e: any) {
-      toast.error(e?.message || "Chyba pri pripájaní emailu");
-    } finally { setConnectingEmail(false); }
-  };
+      await moveDocumentPeriod({ data: { documentId: docId, targetMonth, targetYear } });
+      queryClient.invalidateQueries({ queryKey: ["portal-docs-month"] });
+      toast.success("Doklad presunutý");
+    } catch {
+      toast.error("Nepodarilo sa presunúť doklad");
+    }
+  }, [queryClient]);
 
   const handleConnectBank = async () => {
     if (!clientId) { toast.error("Najskôr musíte byť priradený ku klientovi"); return; }
@@ -138,32 +154,47 @@ function PortalDashboard() {
         <section>
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Prepojenia</h2>
           <div className="grid gap-3 sm:grid-cols-2">
+            {/* Email integrations */}
             <Card>
-              <CardContent className="p-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Mail className="h-5 w-5 text-muted-foreground" />
-                  <div>
-                    <p className="text-sm font-medium">E-mail</p>
-                    <p className="text-xs text-muted-foreground">Automatický zber faktúr</p>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Mail className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm font-medium">E-maily</span>
                   </div>
-                </div>
-                {stats?.emailConnected ? (
-                  <span className="flex items-center gap-1 text-xs text-success"><CheckCircle className="h-3.5 w-3.5" /> Pripojené</span>
-                ) : (
-                  <Button size="sm" variant="outline" onClick={handleConnectEmail} disabled={connectingEmail || !clientId}>
-                    {connectingEmail && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
-                    Pripojiť
+                  <Button size="sm" variant="outline" onClick={() => setEmailDialogOpen(true)} disabled={!clientId}>
+                    <Plus className="h-3.5 w-3.5 mr-1" /> Pridať
                   </Button>
+                </div>
+                {connectedEmails.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">Žiadne pripojené e-maily</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {connectedEmails.map((ei: any) => (
+                      <div key={ei.id} className="flex items-center justify-between text-xs border border-border p-1.5">
+                        <div>
+                          <span className="font-medium">{ei.email_address}</span>
+                          <span className="ml-1.5 text-[9px] text-muted-foreground">
+                            ({ei.provider === "google" ? "Gmail" : ei.provider === "microsoft" ? "Outlook" : "IMAP"})
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <CheckCircle className="h-3 w-3 text-success" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </CardContent>
             </Card>
+
             <Card>
               <CardContent className="p-4 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <Building2 className="h-5 w-5 text-muted-foreground" />
                   <div>
                     <p className="text-sm font-medium">Banka</p>
-                    <p className="text-xs text-muted-foreground">SK/CZ banky cez Salt Edge</p>
+                    <p className="text-xs text-muted-foreground">SK/CZ banky</p>
                   </div>
                 </div>
                 {stats?.bankConnected ? (
@@ -227,7 +258,7 @@ function PortalDashboard() {
           )}
         </section>
 
-        {/* Documents by month */}
+        {/* Documents by month with drag & drop */}
         <section>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Doklady</h2>
@@ -242,44 +273,108 @@ function PortalDashboard() {
             </div>
           </div>
 
-          {docsLoading ? (
-            <div className="text-center py-8"><Loader2 className="h-5 w-5 animate-spin mx-auto text-muted-foreground" /></div>
-          ) : documents.length === 0 ? (
-            <Card>
-              <CardContent className="p-8 text-center">
-                <FileText className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground">Žiadne doklady za {MONTH_NAMES[month - 1].toLowerCase()} {year}</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-2">
-              {documents.map((doc: any) => {
-                const SourceIcon = sourceIcons[doc.source] || FileText;
-                const status = statusConfig[doc.status] || { label: doc.status, class: "bg-muted text-muted-foreground" };
-                return (
-                  <Card key={doc.id}>
-                    <CardContent className="p-3 flex items-center justify-between">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <SourceIcon className="h-4 w-4 text-muted-foreground shrink-0" />
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium truncate">{doc.supplier_name || doc.file_name || "Neznámy"}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {doc.total_amount ? `${Number(doc.total_amount).toLocaleString("sk-SK")} €` : "–"}
-                            {doc.issue_date && ` · ${new Date(doc.issue_date).toLocaleDateString("sk-SK")}`}
-                          </p>
+          <div
+            className="min-h-[100px] border-2 border-dashed border-transparent transition-colors"
+            onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add("border-primary/40", "bg-primary/5"); }}
+            onDragLeave={(e) => { e.currentTarget.classList.remove("border-primary/40", "bg-primary/5"); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.currentTarget.classList.remove("border-primary/40", "bg-primary/5");
+              const docId = e.dataTransfer.getData("text/plain");
+              if (docId) handleDropOnPeriod(docId, month, year);
+            }}
+          >
+            {docsLoading ? (
+              <div className="text-center py-8"><Loader2 className="h-5 w-5 animate-spin mx-auto text-muted-foreground" /></div>
+            ) : documents.length === 0 ? (
+              <Card>
+                <CardContent className="p-8 text-center">
+                  <FileText className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">Žiadne doklady za {MONTH_NAMES[month - 1].toLowerCase()} {year}</p>
+                  <p className="text-[10px] text-muted-foreground mt-1">Presuňte doklad sem pomocou drag & drop</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-2">
+                {documents.map((doc: any) => {
+                  const SourceIcon = sourceIcons[doc.source] || FileText;
+                  const status = statusConfig[doc.status] || { label: doc.status, class: "bg-muted text-muted-foreground" };
+                  return (
+                    <Card
+                      key={doc.id}
+                      draggable
+                      className="cursor-grab active:cursor-grabbing"
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData("text/plain", doc.id);
+                        setDraggedDocId(doc.id);
+                      }}
+                      onDragEnd={() => setDraggedDocId(null)}
+                    >
+                      <CardContent className="p-3 flex items-center justify-between">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <GripVertical className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                          <SourceIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">{doc.supplier_name || doc.file_name || "Neznámy"}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {doc.total_amount ? `${Number(doc.total_amount).toLocaleString("sk-SK")} €` : "–"}
+                              {doc.issue_date && ` · ${new Date(doc.issue_date).toLocaleDateString("sk-SK")}`}
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                      <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-medium ${status.class}`}>
-                        {status.label}
-                      </span>
-                    </CardContent>
-                  </Card>
-                );
-              })}
+                        <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-medium ${status.class}`}>
+                          {status.label}
+                        </span>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Adjacent months drop zones when dragging */}
+          {draggedDocId && (
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              <div
+                className="border-2 border-dashed border-muted p-3 text-center text-xs text-muted-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const docId = e.dataTransfer.getData("text/plain");
+                  const pm = month === 1 ? 12 : month - 1;
+                  const py = month === 1 ? year - 1 : year;
+                  if (docId) handleDropOnPeriod(docId, pm, py);
+                }}
+              >
+                ← {MONTH_NAMES[(month - 2 + 12) % 12]} {month === 1 ? year - 1 : year}
+              </div>
+              <div
+                className="border-2 border-dashed border-muted p-3 text-center text-xs text-muted-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const docId = e.dataTransfer.getData("text/plain");
+                  const nm = month === 12 ? 1 : month + 1;
+                  const ny = month === 12 ? year + 1 : year;
+                  if (docId) handleDropOnPeriod(docId, nm, ny);
+                }}
+              >
+                {MONTH_NAMES[month % 12]} {month === 12 ? year + 1 : year} →
+              </div>
             </div>
           )}
         </section>
       </div>
+
+      {clientId && (
+        <EmailConnectDialog
+          open={emailDialogOpen}
+          onOpenChange={setEmailDialogOpen}
+          clientId={clientId}
+          existingEmails={connectedEmails.map((e: any) => e.email_address?.toLowerCase()).filter(Boolean)}
+        />
+      )}
     </PortalLayout>
   );
 }

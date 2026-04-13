@@ -2,15 +2,17 @@ import { createFileRoute, Link, useSearch } from "@tanstack/react-router";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { FileText, Mail, Building2, ArrowLeft, Loader2, Upload, RefreshCw, Copy, Check, LinkIcon } from "lucide-react";
+import { FileText, Mail, Building2, ArrowLeft, Loader2, Upload, RefreshCw, Copy, Check, LinkIcon, Plus, Trash2, GripVertical, ChevronLeft, ChevronRight } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clientQueryOptions } from "@/lib/query-options";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { DocumentViewer } from "@/components/documents/DocumentViewer";
+import { EmailConnectDialog } from "@/components/email/EmailConnectDialog";
 import {
-  getNylasConnectUrl,
   exchangeNylasCode,
   triggerEmailScan,
+  disconnectEmail,
+  moveDocumentPeriod,
 } from "@/lib/server-functions";
 import {
   initBankConnection,
@@ -18,6 +20,7 @@ import {
   syncBankTransactions,
 } from "@/lib/server-functions/bank";
 import { createInvitation } from "@/lib/server-functions/invitations";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/clients/$clientId")({
   component: ClientDetailPage,
@@ -37,19 +40,29 @@ const statusConfig: Record<string, { label: string; class: string }> = {
   error: { label: "Chyba", class: "bg-destructive/15 text-destructive" },
 };
 
+const MONTH_NAMES = [
+  "Január", "Február", "Marec", "Apríl", "Máj", "Jún",
+  "Júl", "August", "September", "Október", "November", "December",
+];
+
 function ClientDetailPage() {
   const { clientId } = Route.useParams();
   const { nylas_code, bank_connected, connection_id } = Route.useSearch();
   const { data, isLoading } = useQuery(clientQueryOptions(clientId));
   const [selectedDoc, setSelectedDoc] = useState<any>(null);
-  const [connectingEmail, setConnectingEmail] = useState(false);
   const [exchangingCode, setExchangingCode] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [connectingBank, setConnectingBank] = useState(false);
   const [syncingBank, setSyncingBank] = useState(false);
   const [inviteCopied, setInviteCopied] = useState(false);
   const [creatingInvite, setCreatingInvite] = useState(false);
+  const [emailDialogOpen, setEmailDialogOpen] = useState(false);
+  const [draggedDocId, setDraggedDocId] = useState<string | null>(null);
   const queryClient = useQueryClient();
+
+  const now = new Date();
+  const [viewYear, setViewYear] = useState(now.getFullYear());
+  const [viewMonth, setViewMonth] = useState(now.getMonth() + 1);
 
   // Handle Nylas OAuth callback
   useEffect(() => {
@@ -58,11 +71,12 @@ function ClientDetailPage() {
       exchangeNylasCode({ data: { code: nylas_code, clientId } })
         .then(() => {
           queryClient.invalidateQueries({ queryKey: ["client", clientId] });
-          // Clean URL
           window.history.replaceState({}, "", `/clients/${clientId}`);
+          toast.success("E-mailový účet úspešne pripojený");
         })
         .catch((err) => {
           console.error("Nylas exchange failed:", err);
+          toast.error("Nepodarilo sa pripojiť e-mail");
         })
         .finally(() => setExchangingCode(false));
     }
@@ -74,7 +88,6 @@ function ClientDetailPage() {
       completeBankConnection({ data: { clientId, connectionId: connection_id } })
         .then(() => {
           queryClient.invalidateQueries({ queryKey: ["client", clientId] });
-          // Automatically sync transactions after connection
           return syncBankTransactions({ data: { clientId } });
         })
         .then(() => {
@@ -85,23 +98,45 @@ function ClientDetailPage() {
     }
   }, [bank_connected, connection_id]);
 
+  const handleDropOnPeriod = useCallback(async (docId: string, targetMonth: number, targetYear: number) => {
+    try {
+      await moveDocumentPeriod({ data: { documentId: docId, targetMonth, targetYear } });
+      queryClient.invalidateQueries({ queryKey: ["client", clientId] });
+      toast.success("Doklad presunutý");
+    } catch {
+      toast.error("Nepodarilo sa presunúť doklad");
+    }
+  }, [clientId, queryClient]);
+
   if (isLoading || !data) {
     return <DashboardLayout><div className="text-sm text-muted-foreground">Načítavam...</div></DashboardLayout>;
   }
 
-  const { client, docCount, txCount, emailIntegration, bankIntegration, documents } = data;
+  const { client, docCount, txCount, emailIntegrations, bankIntegration, documents } = data;
+  const connectedEmails = emailIntegrations.filter((e: any) => e.status === "connected");
+  const existingEmailAddresses = connectedEmails.map((e: any) => e.email_address?.toLowerCase()).filter(Boolean);
 
-  async function handleConnectEmail() {
-    setConnectingEmail(true);
-    try {
-      const result = await getNylasConnectUrl({ data: { clientId } });
-      if (result?.url) {
-        window.open(result.url, '_blank', 'noopener');
-      }
-    } catch (err) {
-      console.error("Failed to get Nylas URL:", err);
-      setConnectingEmail(false);
+  // Group documents by month/year (using tax_period or created_at)
+  const getDocPeriod = (doc: any) => {
+    if (doc.tax_period_month && doc.tax_period_year) {
+      return { month: doc.tax_period_month, year: doc.tax_period_year };
     }
+    const d = new Date(doc.issue_date || doc.created_at);
+    return { month: d.getMonth() + 1, year: d.getFullYear() };
+  };
+
+  const currentPeriodDocs = documents.filter((doc: any) => {
+    const p = getDocPeriod(doc);
+    return p.month === viewMonth && p.year === viewYear;
+  });
+
+  function prevMonth() {
+    if (viewMonth === 1) { setViewMonth(12); setViewYear(y => y - 1); }
+    else setViewMonth(m => m - 1);
+  }
+  function nextMonth() {
+    if (viewMonth === 12) { setViewMonth(1); setViewYear(y => y + 1); }
+    else setViewMonth(m => m + 1);
   }
 
   return (
@@ -173,10 +208,8 @@ function ClientDetailPage() {
             <p className="text-xs text-muted-foreground">Transakcie</p>
           </CardContent></Card>
           <Card><CardContent className="p-4 text-center">
-            <div className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-none ${emailIntegration?.status === "connected" ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>
-              {emailIntegration?.status === "connected" ? "Pripojený" : "Nepripojený"}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">Email</p>
+            <p className="text-2xl font-bold">{connectedEmails.length}</p>
+            <p className="text-xs text-muted-foreground">E-maily</p>
           </CardContent></Card>
           <Card><CardContent className="p-4 text-center">
             <div className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-none ${bankIntegration?.status === "connected" ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>
@@ -190,60 +223,73 @@ function ClientDetailPage() {
         <div className="grid gap-4 sm:grid-cols-2">
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2"><Mail className="h-4 w-4" /> E-mailová integrácia</CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm flex items-center gap-2"><Mail className="h-4 w-4" /> E-mailové účty</CardTitle>
+                <Button size="sm" variant="outline" onClick={() => setEmailDialogOpen(true)}>
+                  <Plus className="h-3.5 w-3.5 mr-1" /> Pridať
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
-              {emailIntegration?.status === "connected" ? (
-                <div className="space-y-2">
-                  <p className="text-sm">{emailIntegration.email_address}</p>
-                  <div className="flex items-center gap-2">
-                    <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-medium bg-success/15 text-success rounded-none">Aktívne</span>
-                    {emailIntegration.last_sync_at && (
-                      <span className="text-[10px] text-muted-foreground">
-                        Posledný sken: {new Date(emailIntegration.last_sync_at).toLocaleString("sk-SK")}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={scanning}
-                      onClick={async () => {
-                        setScanning(true);
-                        try {
-                          const result = await triggerEmailScan({ data: { clientId } });
-                          queryClient.invalidateQueries({ queryKey: ["client", clientId] });
-                        } catch (err) {
-                          console.error("Scan failed:", err);
-                        } finally {
-                          setScanning(false);
-                        }
-                      }}
-                    >
-                      {scanning ? (
-                        <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> Skenujem...</>
-                      ) : (
-                        <><RefreshCw className="h-3.5 w-3.5 mr-1" /> Synchronizovať</>
-                      )}
-                    </Button>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground">
-                    Automatický sken každých 15 min. Alebo kliknite pre okamžitú synchronizáciu.
-                  </p>
-                </div>
+              {connectedEmails.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Pripojte e-mail pre automatické skenovanie faktúr z príloh.
+                </p>
               ) : (
-                <div className="space-y-3">
-                  <p className="text-xs text-muted-foreground">
-                    Pripojte e-mail klienta (Gmail, Outlook) pre automatické skenovanie faktúr z príloh.
-                  </p>
-                  <Button size="sm" onClick={handleConnectEmail} disabled={connectingEmail}>
-                    {connectingEmail ? (
-                      <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> Pripájam...</>
-                    ) : (
-                      <><Mail className="h-3.5 w-3.5 mr-1" /> Pripojiť e-mail</>
-                    )}
-                  </Button>
+                <div className="space-y-2">
+                  {connectedEmails.map((ei: any) => (
+                    <div key={ei.id} className="flex items-center justify-between border border-border p-2">
+                      <div>
+                        <p className="text-sm">{ei.email_address || "Neznámy"}</p>
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium bg-success/15 text-success rounded-none">
+                            {ei.provider === "google" ? "Gmail" : ei.provider === "microsoft" ? "Outlook" : ei.provider || "IMAP"}
+                          </span>
+                          {ei.last_sync_at && (
+                            <span className="text-[9px] text-muted-foreground">
+                              Sync: {new Date(ei.last_sync_at).toLocaleString("sk-SK")}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={scanning}
+                          onClick={async () => {
+                            setScanning(true);
+                            try {
+                              await triggerEmailScan({ data: { clientId } });
+                              queryClient.invalidateQueries({ queryKey: ["client", clientId] });
+                            } catch (err) {
+                              console.error("Scan failed:", err);
+                            } finally {
+                              setScanning(false);
+                            }
+                          }}
+                        >
+                          <RefreshCw className={`h-3.5 w-3.5 ${scanning ? "animate-spin" : ""}`} />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive hover:text-destructive"
+                          onClick={async () => {
+                            try {
+                              await disconnectEmail({ data: { clientId } });
+                              queryClient.invalidateQueries({ queryKey: ["client", clientId] });
+                              toast.success("E-mail odpojený");
+                            } catch {
+                              toast.error("Nepodarilo sa odpojiť e-mail");
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </CardContent>
@@ -319,43 +365,111 @@ function ClientDetailPage() {
           </Card>
         </div>
 
-        {/* Documents */}
+        {/* Documents by month with drag&drop */}
         <div>
-          <h2 className="text-sm font-semibold mb-3">Doklady klienta</h2>
-          {documents.length === 0 ? (
-            <Card>
-              <CardContent className="p-6 text-center">
-                <FileText className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-                <p className="text-xs text-muted-foreground">Zatiaľ žiadne doklady</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {documents.map((doc) => {
-                const status = statusConfig[doc.status] || { label: doc.status, class: "bg-muted text-muted-foreground" };
-                return (
-                  <Card
-                    key={doc.id}
-                    className="cursor-pointer hover:shadow-md transition-all"
-                    onClick={() => setSelectedDoc(doc)}
-                  >
-                    <CardContent className="p-3">
-                      <div className="flex items-start justify-between mb-2">
-                        <span className={`inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium rounded-none ${status.class}`}>
-                          {status.label}
-                        </span>
-                        {doc.source === "email" && (
-                          <Mail className="h-3 w-3 text-muted-foreground" />
-                        )}
-                      </div>
-                      <p className="text-sm font-medium truncate">{doc.supplier_name || doc.file_name || "Neznámy"}</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {doc.total_amount ? `${Number(doc.total_amount).toLocaleString("sk-SK")} €` : "Suma neextrahovaná"}
-                      </p>
-                    </CardContent>
-                  </Card>
-                );
-              })}
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold">Doklady klienta</h2>
+            <div className="flex items-center gap-2">
+              <button onClick={prevMonth} className="p-1 min-h-[44px] min-w-[44px] flex items-center justify-center hover:bg-muted transition-colors">
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <span className="text-sm font-medium min-w-[120px] text-center">{MONTH_NAMES[viewMonth - 1]} {viewYear}</span>
+              <button onClick={nextMonth} className="p-1 min-h-[44px] min-w-[44px] flex items-center justify-center hover:bg-muted transition-colors">
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          <div
+            className="min-h-[100px] border-2 border-dashed border-transparent transition-colors"
+            onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add("border-primary/40", "bg-primary/5"); }}
+            onDragLeave={(e) => { e.currentTarget.classList.remove("border-primary/40", "bg-primary/5"); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.currentTarget.classList.remove("border-primary/40", "bg-primary/5");
+              const docId = e.dataTransfer.getData("text/plain");
+              if (docId) handleDropOnPeriod(docId, viewMonth, viewYear);
+            }}
+          >
+            {currentPeriodDocs.length === 0 ? (
+              <Card>
+                <CardContent className="p-6 text-center">
+                  <FileText className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                  <p className="text-xs text-muted-foreground">
+                    Žiadne doklady za {MONTH_NAMES[viewMonth - 1].toLowerCase()} {viewYear}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground mt-1">Presuňte doklad sem pomocou drag & drop</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {currentPeriodDocs.map((doc: any) => {
+                  const status = statusConfig[doc.status] || { label: doc.status, class: "bg-muted text-muted-foreground" };
+                  return (
+                    <Card
+                      key={doc.id}
+                      draggable
+                      className="cursor-grab active:cursor-grabbing hover:shadow-md transition-all"
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData("text/plain", doc.id);
+                        setDraggedDocId(doc.id);
+                      }}
+                      onDragEnd={() => setDraggedDocId(null)}
+                      onClick={() => setSelectedDoc(doc)}
+                    >
+                      <CardContent className="p-3">
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="flex items-center gap-1">
+                            <GripVertical className="h-3 w-3 text-muted-foreground" />
+                            <span className={`inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium rounded-none ${status.class}`}>
+                              {status.label}
+                            </span>
+                          </div>
+                          {doc.source === "email" && (
+                            <Mail className="h-3 w-3 text-muted-foreground" />
+                          )}
+                        </div>
+                        <p className="text-sm font-medium truncate">{doc.supplier_name || doc.file_name || "Neznámy"}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {doc.total_amount ? `${Number(doc.total_amount).toLocaleString("sk-SK")} €` : "Suma neextrahovaná"}
+                        </p>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Adjacent months drop zones when dragging */}
+          {draggedDocId && (
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              <div
+                className="border-2 border-dashed border-muted p-3 text-center text-xs text-muted-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const docId = e.dataTransfer.getData("text/plain");
+                  const pm = viewMonth === 1 ? 12 : viewMonth - 1;
+                  const py = viewMonth === 1 ? viewYear - 1 : viewYear;
+                  if (docId) handleDropOnPeriod(docId, pm, py);
+                }}
+              >
+                ← {MONTH_NAMES[(viewMonth - 2 + 12) % 12]} {viewMonth === 1 ? viewYear - 1 : viewYear}
+              </div>
+              <div
+                className="border-2 border-dashed border-muted p-3 text-center text-xs text-muted-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const docId = e.dataTransfer.getData("text/plain");
+                  const nm = viewMonth === 12 ? 1 : viewMonth + 1;
+                  const ny = viewMonth === 12 ? viewYear + 1 : viewYear;
+                  if (docId) handleDropOnPeriod(docId, nm, ny);
+                }}
+              >
+                {MONTH_NAMES[viewMonth % 12]} {viewMonth === 12 ? viewYear + 1 : viewYear} →
+              </div>
             </div>
           )}
         </div>
@@ -365,6 +479,13 @@ function ClientDetailPage() {
         document={selectedDoc}
         open={!!selectedDoc}
         onOpenChange={(open) => { if (!open) setSelectedDoc(null); }}
+      />
+
+      <EmailConnectDialog
+        open={emailDialogOpen}
+        onOpenChange={setEmailDialogOpen}
+        clientId={clientId}
+        existingEmails={existingEmailAddresses}
       />
     </DashboardLayout>
   );
