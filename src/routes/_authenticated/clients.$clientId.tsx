@@ -239,26 +239,24 @@ function ClientDetailPage() {
                   Pripojte e-mail pre automatické sťahovanie dokladov z príloh.
                 </p>
               ) : (
-                <div className="space-y-2">
-                  {connectedEmails.map((ei: any) => (
-                    <div key={ei.id} className="flex items-center justify-between border border-border p-2">
-                      <div>
-                        <p className="text-sm">{ei.email_address || "Neznámy"}</p>
-                        <div className="flex items-center gap-2">
-                          <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium bg-success/15 text-success rounded-none">
-                            {ei.provider === "google" ? "Gmail" : ei.provider === "microsoft" ? "Outlook" : ei.provider || "IMAP"}
+                <div className="space-y-1.5">
+                  {connectedEmails.map((ei: any) => {
+                    const providerIcon = ei.provider === "google" ? "📧" : ei.provider === "microsoft" ? "📬" : "✉️";
+                    const providerLabel = ei.provider === "google" ? "Gmail" : ei.provider === "microsoft" ? "Outlook" : "IMAP";
+                    return (
+                      <div key={ei.id} className="flex items-center gap-2 px-2 py-1.5 border border-border bg-muted/20 group">
+                        <span className="text-sm shrink-0">{providerIcon}</span>
+                        <span className="text-xs font-medium truncate flex-1">{ei.email_address || "Neznámy"}</span>
+                        <span className="text-[9px] px-1 py-px bg-primary/10 text-primary font-medium shrink-0">{providerLabel}</span>
+                        {ei.last_sync_at && (
+                          <span className="text-[9px] text-muted-foreground shrink-0 hidden sm:inline">
+                            {new Date(ei.last_sync_at).toLocaleDateString("sk-SK")}
                           </span>
-                          {ei.last_sync_at && (
-                            <span className="text-[9px] text-muted-foreground">
-                              Sync: {new Date(ei.last_sync_at).toLocaleString("sk-SK")}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1">
+                        )}
                         <Button
-                          size="sm"
+                          size="icon"
                           variant="ghost"
+                          className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
                           disabled={scanning}
                           onClick={async () => {
                             setScanning(true);
@@ -272,12 +270,12 @@ function ClientDetailPage() {
                             }
                           }}
                         >
-                          <RefreshCw className={`h-3.5 w-3.5 ${scanning ? "animate-spin" : ""}`} />
+                          <RefreshCw className={`h-3 w-3 ${scanning ? "animate-spin" : ""}`} />
                         </Button>
                         <Button
-                          size="sm"
+                          size="icon"
                           variant="ghost"
-                          className="text-destructive hover:text-destructive"
+                          className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive shrink-0"
                           onClick={async () => {
                             try {
                               await disconnectEmail({ data: { clientId } });
@@ -288,11 +286,11 @@ function ClientDetailPage() {
                             }
                           }}
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
+                          <Trash2 className="h-3 w-3" />
                         </Button>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
