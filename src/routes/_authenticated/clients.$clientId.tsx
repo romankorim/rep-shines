@@ -225,44 +225,46 @@ function ClientDetailPage() {
         {/* Integration cards */}
         <div className="grid gap-4 sm:grid-cols-2">
           <Card>
-            <CardHeader className="py-2 px-3">
+            <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-xs flex items-center gap-1.5"><Mail className="h-3.5 w-3.5" /> E-mailové účty</CardTitle>
-                <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => setEmailDialogOpen(true)}>
-                  <Plus className="h-3 w-3" />
+                <CardTitle className="text-sm flex items-center gap-2"><Mail className="h-4 w-4" /> E-mailové účty</CardTitle>
+                <Button size="sm" variant="outline" onClick={() => setEmailDialogOpen(true)}>
+                  <Plus className="h-3.5 w-3.5 mr-1" /> Pridať
                 </Button>
               </div>
             </CardHeader>
-            <CardContent className="px-3 pb-2 pt-0">
+            <CardContent>
               {connectedEmails.length === 0 ? (
                 <p className="text-xs text-muted-foreground">
-                  Pripojte e-mail pre automatické sťahovanie dokladov.
+                  Pripojte e-mail pre automatické sťahovanie dokladov z príloh.
                 </p>
               ) : (
-                <div className="space-y-1">
+                <div className="space-y-1.5">
                   {connectedEmails.map((ei: any) => {
                     const providerLogo = ei.provider === "google" ? (
-                      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg">
+                      <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" xmlns="http://www.w3.org/2000/svg">
                         <path d="M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 0 1 0 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.91 1.528-1.145C21.69 2.28 24 3.434 24 5.457z" fill="#EA4335"/>
                       </svg>
                     ) : ei.provider === "microsoft" ? (
-                      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg">
+                      <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" xmlns="http://www.w3.org/2000/svg">
                         <path d="M0 0h11.377v11.372H0zm12.623 0H24v11.372H12.623zM0 12.623h11.377V24H0zm12.623 0H24V24H12.623z" fill="#0078D4"/>
                       </svg>
                     ) : (
-                      <Mail className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <Mail className="h-4 w-4 shrink-0 text-muted-foreground" />
                     );
                     return (
-                      <div key={ei.id} className="flex items-center gap-1.5 px-1.5 py-1 border border-border bg-muted/20 group">
+                      <div key={ei.id} className="flex items-center gap-2 px-2 py-1.5 border border-border bg-muted/20 group">
                         {providerLogo}
-                        <span className="text-[11px] font-medium truncate flex-1">{ei.email_address || "Neznámy"}</span>
-                        <span className="text-[9px] text-muted-foreground shrink-0">
-                          {ei.last_sync_at ? new Date(ei.last_sync_at).toLocaleDateString("sk-SK") : ""}
-                        </span>
+                        <span className="text-xs font-medium truncate flex-1">{ei.email_address || "Neznámy"}</span>
+                        {ei.last_sync_at && (
+                          <span className="text-[9px] text-muted-foreground shrink-0 hidden sm:inline">
+                            {new Date(ei.last_sync_at).toLocaleDateString("sk-SK")}
+                          </span>
+                        )}
                         <Button
                           size="icon"
                           variant="ghost"
-                          className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive shrink-0"
+                          className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive shrink-0"
                           onClick={async () => {
                             try {
                               await disconnectEmail({ data: { clientId } });
@@ -273,7 +275,7 @@ function ClientDetailPage() {
                             }
                           }}
                         >
-                          <X className="h-2.5 w-2.5" />
+                          <X className="h-3 w-3" />
                         </Button>
                       </div>
                     );
