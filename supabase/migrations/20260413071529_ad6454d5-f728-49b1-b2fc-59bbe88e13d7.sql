@@ -1,0 +1,3 @@
+ALTER TABLE public.email_integrations DROP CONSTRAINT IF EXISTS email_integrations_client_id_office_id_key;
+ALTER TABLE public.email_integrations ADD CONSTRAINT email_integrations_client_id_key UNIQUE (client_id);
+ALTER TABLE public.email_integrations ADD CONSTRAINT email_integrations_nylas_grant_id_key UNIQUE (nylas_grant_id);

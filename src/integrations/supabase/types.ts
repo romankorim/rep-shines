@@ -602,7 +602,7 @@ export type Database = {
           {
             foreignKeyName: "email_integrations_client_id_fkey"
             columns: ["client_id"]
-            isOneToOne: false
+            isOneToOne: true
             referencedRelation: "clients"
             referencedColumns: ["id"]
           },
