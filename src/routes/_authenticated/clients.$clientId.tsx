@@ -112,6 +112,23 @@ function ClientDetailPage() {
     }
   }, [bank_connected, connection_id]);
 
+  // Auto-navigate to the period of the most recent document
+  useEffect(() => {
+    if (initialPeriodSet || !data?.documents?.length) return;
+    const docs = data.documents;
+    // Find most recent document by created_at
+    const sorted = [...docs].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    const latest = sorted[0];
+    if (latest) {
+      const period = (latest.tax_period_month && latest.tax_period_year)
+        ? { month: latest.tax_period_month, year: latest.tax_period_year }
+        : (() => { const d = new Date(latest.issue_date || latest.created_at); return { month: d.getMonth() + 1, year: d.getFullYear() }; })();
+      setViewMonth(period.month);
+      setViewYear(period.year);
+    }
+    setInitialPeriodSet(true);
+  }, [data?.documents, initialPeriodSet]);
+
   const handleDropOnPeriod = useCallback(async (docId: string, targetMonth: number, targetYear: number) => {
     try {
       await moveDocumentPeriod({ data: { documentId: docId, targetMonth, targetYear } });
