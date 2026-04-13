@@ -3,6 +3,7 @@ import { useState } from "react";
 import { LayoutDashboard, Users, FileText, Receipt, LogOut, Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
+import { AiChatButton } from "@/components/ai/AiChatButton";
 
 const navItems = [
   { to: "/dashboard", label: "Prehľad", icon: LayoutDashboard },
