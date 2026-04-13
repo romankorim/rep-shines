@@ -6,23 +6,30 @@ import dns from "node:dns";
 
 const FALLBACK_APP_URL = "https://id-preview--e35fe031-9c7f-4f24-ac03-1474b0aafb32.lovable.app";
 
-function getAppUrl() {
+function getStableAppUrl() {
+  return process.env.APP_URL || FALLBACK_APP_URL;
+}
+
+function getCurrentRequestOrigin() {
   const originHeader = getRequestHeader("origin");
-  if (originHeader) {
+  if (originHeader && !originHeader.includes("localhost")) {
     return originHeader;
   }
 
   const refererHeader = getRequestHeader("referer");
   if (refererHeader) {
     try {
-      return new URL(refererHeader).origin;
+      const refererOrigin = new URL(refererHeader).origin;
+      if (!refererOrigin.includes("localhost")) {
+        return refererOrigin;
+      }
     } catch {
       // ignore invalid referer
     }
   }
 
   const forwardedHost = getRequestHeader("x-forwarded-host");
-  if (forwardedHost) {
+  if (forwardedHost && !forwardedHost.startsWith("localhost")) {
     const forwardedProto = getRequestHeader("x-forwarded-proto") || "https";
     return `${forwardedProto}://${forwardedHost}`;
   }
@@ -45,25 +52,26 @@ function getAppUrl() {
     }
   }
 
-  return process.env.APP_URL || FALLBACK_APP_URL;
+  return getStableAppUrl();
 }
 
 // Detect email provider via MX records (server-side DNS lookup)
 export const detectEmailProvider = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({ email: z.string().email() }))
+  .inputValidator(z.object({ email: z.string().trim().min(1) }))
   .handler(async ({ data }) => {
-    const domain = data.email.split("@")[1]?.toLowerCase();
-    if (!domain) return { provider: "imap" as const };
+    const normalizedEmail = data.email.trim().toLowerCase();
+    const domain = normalizedEmail.split("@")[1]?.toLowerCase();
+    if (!domain || !normalizedEmail.includes("@") || !domain.includes(".")) {
+      return { provider: "imap" as const, confidence: "fallback" };
+    }
 
-    // Quick domain check first
     const knownGoogle = ["gmail.com", "googlemail.com"];
     const knownMicrosoft = ["outlook.com", "hotmail.com", "live.com", "msn.com", "outlook.sk", "outlook.cz"];
 
     if (knownGoogle.includes(domain)) return { provider: "google" as const, confidence: "domain" };
     if (knownMicrosoft.includes(domain) || domain.endsWith(".onmicrosoft.com")) return { provider: "microsoft" as const, confidence: "domain" };
 
-    // For custom domains, check MX records
     try {
       const mxRecords = await new Promise<dns.MxRecord[]>((resolve, reject) => {
         dns.resolveMx(domain, (err, addresses) => {
@@ -72,22 +80,19 @@ export const detectEmailProvider = createServerFn({ method: "POST" })
         });
       });
 
-      const mxHosts = mxRecords.map(r => r.exchange.toLowerCase());
+      const mxHosts = mxRecords.map((r) => r.exchange.toLowerCase());
       const mxString = mxHosts.join(" ");
 
-      // Google Workspace MX records contain google.com or googlemail.com
       if (mxString.includes("google.com") || mxString.includes("googlemail.com") || mxString.includes("smtp.google.com")) {
         return { provider: "google" as const, confidence: "mx" };
       }
 
-      // Microsoft 365 MX records contain outlook.com or protection.outlook.com
       if (mxString.includes("outlook.com") || mxString.includes("protection.outlook.com") || mxString.includes("mail.protection.outlook")) {
         return { provider: "microsoft" as const, confidence: "mx" };
       }
 
       return { provider: "imap" as const, confidence: "mx" };
     } catch {
-      // DNS lookup failed, fallback to IMAP
       return { provider: "imap" as const, confidence: "fallback" };
     }
   });
@@ -104,14 +109,18 @@ export const getNylasConnectUrl = createServerFn({ method: "POST" })
     const clientId = process.env.NYLAS_CLIENT_ID;
     if (!clientId) throw new Error("NYLAS_CLIENT_ID not configured");
 
-    const callbackUri = `${getAppUrl()}/api/nylas/callback`;
+    const callbackUri = `${getStableAppUrl()}/api/nylas/callback`;
+    const state = JSON.stringify({
+      clientId: data.clientId,
+      returnOrigin: getCurrentRequestOrigin(),
+    });
 
     const authUrl = new URL("https://api.us.nylas.com/v3/connect/auth");
     authUrl.searchParams.set("client_id", clientId);
     authUrl.searchParams.set("redirect_uri", callbackUri);
     authUrl.searchParams.set("response_type", "code");
     authUrl.searchParams.set("access_type", "offline");
-    authUrl.searchParams.set("state", data.clientId);
+    authUrl.searchParams.set("state", state);
 
     // Minimal scopes - only email reading and attachments
     if (data.provider === "google") {
@@ -144,7 +153,7 @@ export const exchangeNylasCode = createServerFn({ method: "POST" })
     const nylasApiKey = process.env.NYLAS_API_KEY;
     if (!nylasClientId || !nylasApiKey) throw new Error("Nylas not configured");
 
-    const callbackUri = `${getAppUrl()}/api/nylas/callback`;
+    const callbackUri = `${getStableAppUrl()}/api/nylas/callback`;
 
     const tokenResp = await fetch("https://api.us.nylas.com/v3/connect/token", {
       method: "POST",
