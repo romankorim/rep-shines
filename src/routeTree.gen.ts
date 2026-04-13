@@ -23,9 +23,6 @@ import { Route as AuthenticatedClientsRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedPortalIndexRouteImport } from './routes/_authenticated/portal.index'
 import { Route as AuthenticatedClientsIndexRouteImport } from './routes/_authenticated/clients.index'
 import { Route as ApiNylasCallbackRouteImport } from './routes/api/nylas/callback'
-import { Route as AuthenticatedPortalUploadRouteImport } from './routes/_authenticated/portal.upload'
-import { Route as AuthenticatedPortalDocumentsRouteImport } from './routes/_authenticated/portal.documents'
-import { Route as AuthenticatedPortalConnectionsRouteImport } from './routes/_authenticated/portal.connections'
 import { Route as AuthenticatedClientsNewRouteImport } from './routes/_authenticated/clients.new'
 import { Route as AuthenticatedClientsClientIdRouteImport } from './routes/_authenticated/clients.$clientId'
 
@@ -100,24 +97,6 @@ const ApiNylasCallbackRoute = ApiNylasCallbackRouteImport.update({
   path: '/api/nylas/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthenticatedPortalUploadRoute =
-  AuthenticatedPortalUploadRouteImport.update({
-    id: '/upload',
-    path: '/upload',
-    getParentRoute: () => AuthenticatedPortalRoute,
-  } as any)
-const AuthenticatedPortalDocumentsRoute =
-  AuthenticatedPortalDocumentsRouteImport.update({
-    id: '/documents',
-    path: '/documents',
-    getParentRoute: () => AuthenticatedPortalRoute,
-  } as any)
-const AuthenticatedPortalConnectionsRoute =
-  AuthenticatedPortalConnectionsRouteImport.update({
-    id: '/connections',
-    path: '/connections',
-    getParentRoute: () => AuthenticatedPortalRoute,
-  } as any)
 const AuthenticatedClientsNewRoute = AuthenticatedClientsNewRouteImport.update({
   id: '/new',
   path: '/new',
@@ -143,9 +122,6 @@ export interface FileRoutesByFullPath {
   '/hooks/scan-all-emails': typeof HooksScanAllEmailsRoute
   '/clients/$clientId': typeof AuthenticatedClientsClientIdRoute
   '/clients/new': typeof AuthenticatedClientsNewRoute
-  '/portal/connections': typeof AuthenticatedPortalConnectionsRoute
-  '/portal/documents': typeof AuthenticatedPortalDocumentsRoute
-  '/portal/upload': typeof AuthenticatedPortalUploadRoute
   '/api/nylas/callback': typeof ApiNylasCallbackRoute
   '/clients/': typeof AuthenticatedClientsIndexRoute
   '/portal/': typeof AuthenticatedPortalIndexRoute
@@ -161,9 +137,6 @@ export interface FileRoutesByTo {
   '/hooks/scan-all-emails': typeof HooksScanAllEmailsRoute
   '/clients/$clientId': typeof AuthenticatedClientsClientIdRoute
   '/clients/new': typeof AuthenticatedClientsNewRoute
-  '/portal/connections': typeof AuthenticatedPortalConnectionsRoute
-  '/portal/documents': typeof AuthenticatedPortalDocumentsRoute
-  '/portal/upload': typeof AuthenticatedPortalUploadRoute
   '/api/nylas/callback': typeof ApiNylasCallbackRoute
   '/clients': typeof AuthenticatedClientsIndexRoute
   '/portal': typeof AuthenticatedPortalIndexRoute
@@ -183,9 +156,6 @@ export interface FileRoutesById {
   '/hooks/scan-all-emails': typeof HooksScanAllEmailsRoute
   '/_authenticated/clients/$clientId': typeof AuthenticatedClientsClientIdRoute
   '/_authenticated/clients/new': typeof AuthenticatedClientsNewRoute
-  '/_authenticated/portal/connections': typeof AuthenticatedPortalConnectionsRoute
-  '/_authenticated/portal/documents': typeof AuthenticatedPortalDocumentsRoute
-  '/_authenticated/portal/upload': typeof AuthenticatedPortalUploadRoute
   '/api/nylas/callback': typeof ApiNylasCallbackRoute
   '/_authenticated/clients/': typeof AuthenticatedClientsIndexRoute
   '/_authenticated/portal/': typeof AuthenticatedPortalIndexRoute
@@ -205,9 +175,6 @@ export interface FileRouteTypes {
     | '/hooks/scan-all-emails'
     | '/clients/$clientId'
     | '/clients/new'
-    | '/portal/connections'
-    | '/portal/documents'
-    | '/portal/upload'
     | '/api/nylas/callback'
     | '/clients/'
     | '/portal/'
@@ -223,9 +190,6 @@ export interface FileRouteTypes {
     | '/hooks/scan-all-emails'
     | '/clients/$clientId'
     | '/clients/new'
-    | '/portal/connections'
-    | '/portal/documents'
-    | '/portal/upload'
     | '/api/nylas/callback'
     | '/clients'
     | '/portal'
@@ -244,9 +208,6 @@ export interface FileRouteTypes {
     | '/hooks/scan-all-emails'
     | '/_authenticated/clients/$clientId'
     | '/_authenticated/clients/new'
-    | '/_authenticated/portal/connections'
-    | '/_authenticated/portal/documents'
-    | '/_authenticated/portal/upload'
     | '/api/nylas/callback'
     | '/_authenticated/clients/'
     | '/_authenticated/portal/'
@@ -362,27 +323,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiNylasCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_authenticated/portal/upload': {
-      id: '/_authenticated/portal/upload'
-      path: '/upload'
-      fullPath: '/portal/upload'
-      preLoaderRoute: typeof AuthenticatedPortalUploadRouteImport
-      parentRoute: typeof AuthenticatedPortalRoute
-    }
-    '/_authenticated/portal/documents': {
-      id: '/_authenticated/portal/documents'
-      path: '/documents'
-      fullPath: '/portal/documents'
-      preLoaderRoute: typeof AuthenticatedPortalDocumentsRouteImport
-      parentRoute: typeof AuthenticatedPortalRoute
-    }
-    '/_authenticated/portal/connections': {
-      id: '/_authenticated/portal/connections'
-      path: '/connections'
-      fullPath: '/portal/connections'
-      preLoaderRoute: typeof AuthenticatedPortalConnectionsRouteImport
-      parentRoute: typeof AuthenticatedPortalRoute
-    }
     '/_authenticated/clients/new': {
       id: '/_authenticated/clients/new'
       path: '/new'
@@ -416,16 +356,10 @@ const AuthenticatedClientsRouteWithChildren =
   AuthenticatedClientsRoute._addFileChildren(AuthenticatedClientsRouteChildren)
 
 interface AuthenticatedPortalRouteChildren {
-  AuthenticatedPortalConnectionsRoute: typeof AuthenticatedPortalConnectionsRoute
-  AuthenticatedPortalDocumentsRoute: typeof AuthenticatedPortalDocumentsRoute
-  AuthenticatedPortalUploadRoute: typeof AuthenticatedPortalUploadRoute
   AuthenticatedPortalIndexRoute: typeof AuthenticatedPortalIndexRoute
 }
 
 const AuthenticatedPortalRouteChildren: AuthenticatedPortalRouteChildren = {
-  AuthenticatedPortalConnectionsRoute: AuthenticatedPortalConnectionsRoute,
-  AuthenticatedPortalDocumentsRoute: AuthenticatedPortalDocumentsRoute,
-  AuthenticatedPortalUploadRoute: AuthenticatedPortalUploadRoute,
   AuthenticatedPortalIndexRoute: AuthenticatedPortalIndexRoute,
 }
 

@@ -8,7 +8,7 @@ export {
   createDocumentRecord,
 } from "./documents";
 export { getVatOverview } from "./vat";
-export { getPortalStats, getPortalDocuments } from "./portal";
+export { getPortalStats, getPortalDocuments, getPortalDocumentsByMonth } from "./portal";
 export {
   getNylasConnectUrl,
   exchangeNylasCode,
