@@ -5,7 +5,7 @@ import {
   Mail, Building2, Loader2, CheckCircle, Upload, Camera,
   ChevronLeft, ChevronRight, FileText, AlertCircle, Check,
 } from "lucide-react";
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getPortalStats, getPortalDocumentsByMonth, createDocumentRecord } from "@/lib/server-functions";
 import { getNylasConnectUrl } from "@/lib/server-functions/nylas";
