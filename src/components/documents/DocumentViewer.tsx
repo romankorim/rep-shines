@@ -40,6 +40,16 @@ const expenseCategories = [
   "materiál", "služby", "cestovné", "telefón", "internet", "nájom", "poistenie", "ostatné",
 ];
 
+const docTypeOptions = [
+  { value: "received_invoice", label: "Prijatá faktúra" },
+  { value: "issued_invoice", label: "Vydaná faktúra" },
+  { value: "receipt", label: "Účtenka" },
+  { value: "credit_note", label: "Dobropis" },
+  { value: "advance_invoice", label: "Zálohová faktúra" },
+  { value: "bank_statement", label: "Bankový výpis" },
+  { value: "other", label: "Iné" },
+];
+
 function EditableField({ label, value, editing, onChange, type = "text" }: {
   label: string; value: string; editing: boolean; onChange: (v: string) => void; type?: string;
 }) {
@@ -64,6 +74,7 @@ export function DocumentViewer({ document: doc, open, onOpenChange }: DocumentVi
   const [editing, setEditing] = useState(false);
 
   // Editable fields
+  const [documentType, setDocumentType] = useState("");
   const [supplierName, setSupplierName] = useState("");
   const [supplierIco, setSupplierIco] = useState("");
   const [supplierDic, setSupplierDic] = useState("");
@@ -81,6 +92,7 @@ export function DocumentViewer({ document: doc, open, onOpenChange }: DocumentVi
   // Sync state when doc changes
   useEffect(() => {
     if (doc) {
+      setDocumentType(doc.document_type || "");
       setAccountantNotes(doc.accountant_notes || "");
       setExpenseCategory(doc.expense_category || "");
       setAccountingCode(doc.accounting_code || "");
@@ -119,6 +131,7 @@ export function DocumentViewer({ document: doc, open, onOpenChange }: DocumentVi
       await updateDocumentFields({
         data: {
           documentId: doc.id,
+          documentType: documentType as any || undefined,
           supplierName: supplierName || undefined,
           supplierIco: supplierIco || undefined,
           supplierDic: supplierDic || undefined,
@@ -230,6 +243,26 @@ export function DocumentViewer({ document: doc, open, onOpenChange }: DocumentVi
 
               <div className="flex-1 overflow-y-auto">
                 <TabsContent value="details" className="p-4 space-y-4 mt-0">
+                  {/* Document type */}
+                  <div>
+                    <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Druh dokladu</Label>
+                    {editing ? (
+                      <Select value={documentType} onValueChange={setDocumentType}>
+                        <SelectTrigger className="mt-0.5 h-7 text-xs">
+                          <SelectValue placeholder="Vyberte druh dokladu" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {docTypeOptions.map((opt) => (
+                            <SelectItem key={opt.value} value={opt.value} className="text-xs">{opt.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <p className="text-xs mt-0.5 font-medium text-primary">
+                        {docTypeOptions.find((o) => o.value === documentType)?.label || "—"}
+                      </p>
+                    )}
+                  </div>
                   <EditableField label="Dodávateľ" value={supplierName} editing={editing} onChange={setSupplierName} />
                   <div className="grid grid-cols-3 gap-3">
                     <EditableField label="IČO" value={supplierIco} editing={editing} onChange={setSupplierIco} />

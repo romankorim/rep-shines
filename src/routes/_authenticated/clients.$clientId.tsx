@@ -40,6 +40,16 @@ const statusConfig: Record<string, { label: string; class: string }> = {
   error: { label: "Chyba", class: "bg-destructive/15 text-destructive" },
 };
 
+const docTypeLabels: Record<string, string> = {
+  received_invoice: "Prijatá faktúra",
+  issued_invoice: "Vydaná faktúra",
+  receipt: "Účtenka",
+  credit_note: "Dobropis",
+  advance_invoice: "Zálohová faktúra",
+  bank_statement: "Bankový výpis",
+  other: "Iné",
+};
+
 const MONTH_NAMES = [
   "Január", "Február", "Marec", "Apríl", "Máj", "Jún",
   "Júl", "August", "September", "Október", "November", "December",
@@ -457,10 +467,21 @@ function ClientDetailPage() {
                             <GripVertical className="h-2.5 w-2.5 text-muted-foreground" />
                           </div>
                         </div>
+                        {doc.document_type && (
+                          <p className="text-[9px] text-primary font-medium mb-0.5">{docTypeLabels[doc.document_type] || doc.document_type}</p>
+                        )}
                         <p className="text-xs font-medium truncate">{doc.supplier_name || doc.file_name || "Neznámy"}</p>
-                        <p className="text-[10px] text-muted-foreground mt-0.5">
-                          {doc.total_amount ? `${Number(doc.total_amount).toLocaleString("sk-SK")} €` : "—"}
-                        </p>
+                        <div className="flex items-center justify-between mt-0.5">
+                          <p className="text-[10px] text-muted-foreground">
+                            {doc.total_amount ? `${Number(doc.total_amount).toLocaleString("sk-SK")} €` : "—"}
+                          </p>
+                          {doc.issue_date && (
+                            <p className="text-[9px] text-muted-foreground">{new Date(doc.issue_date).toLocaleDateString("sk-SK")}</p>
+                          )}
+                        </div>
+                        {doc.document_number && (
+                          <p className="text-[9px] text-muted-foreground truncate mt-0.5">č. {doc.document_number}</p>
+                        )}
                       </CardContent>
                     </Card>
                   );
