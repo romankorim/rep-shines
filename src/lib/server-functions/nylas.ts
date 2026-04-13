@@ -284,7 +284,18 @@ export const triggerEmailScan = createServerFn({ method: "POST" })
     if (!resp.ok) {
       const errText = await resp.text();
       console.error("Scan failed:", errText);
-      throw new Error("Email scan failed");
+
+      let message = `Email scan failed (${resp.status})`;
+      if (errText) {
+        try {
+          const parsed = JSON.parse(errText);
+          message = parsed?.error || parsed?.message || message;
+        } catch {
+          message = errText;
+        }
+      }
+
+      throw new Error(message);
     }
 
     const result = await resp.json();
