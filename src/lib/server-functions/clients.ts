@@ -36,9 +36,9 @@ export const getClient = createServerFn({ method: "POST" })
       supabase.from("clients").select("*").eq("id", data.clientId).single(),
       supabase.from("documents").select("*", { count: "exact", head: true }).eq("client_id", data.clientId),
       supabase.from("bank_transactions").select("*", { count: "exact", head: true }).eq("client_id", data.clientId),
-      supabase.from("email_integrations").select("*").eq("client_id", data.clientId).limit(1),
+      supabase.from("email_integrations").select("*").eq("client_id", data.clientId).order("created_at", { ascending: false }),
       supabase.from("bank_integrations").select("*").eq("client_id", data.clientId).limit(1),
-      supabase.from("documents").select("*").eq("client_id", data.clientId).order("created_at", { ascending: false }).limit(20),
+      supabase.from("documents").select("*").eq("client_id", data.clientId).order("created_at", { ascending: false }).limit(50),
     ]);
 
     if (clientRes.error) throw new Error(clientRes.error.message);
@@ -47,7 +47,7 @@ export const getClient = createServerFn({ method: "POST" })
       client: clientRes.data,
       docCount: docsRes.count ?? 0,
       txCount: txRes.count ?? 0,
-      emailIntegration: emailRes.data?.[0] ?? null,
+      emailIntegrations: emailRes.data ?? [],
       bankIntegration: bankRes.data?.[0] ?? null,
       documents: documentsRes.data ?? [],
     };
