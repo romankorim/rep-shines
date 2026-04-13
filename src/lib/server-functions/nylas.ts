@@ -234,7 +234,7 @@ export const exchangeNylasCode = createServerFn({ method: "POST" })
 // Trigger manual email scan for a specific client
 export const triggerEmailScan = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({ clientId: z.string().uuid() }))
+  .inputValidator(z.object({ clientId: z.string().uuid(), month: z.number().min(1).max(12).optional(), year: z.number().min(2000).max(2100).optional() }))
   .handler(async ({ data, context }) => {
     const { supabase } = context;
 
@@ -264,6 +264,8 @@ export const triggerEmailScan = createServerFn({ method: "POST" })
         grantId: integration.nylas_grant_id,
         clientId: data.clientId,
         officeId: integration.office_id,
+        month: data.month,
+        year: data.year,
       }),
     });
 
@@ -274,7 +276,7 @@ export const triggerEmailScan = createServerFn({ method: "POST" })
     }
 
     const result = await resp.json();
-    return { success: true, processed: result.processed || 0 };
+    return { success: true, processed: result.processed || 0, skipped: result.skipped || 0 };
   });
 
 // Disconnect email integration

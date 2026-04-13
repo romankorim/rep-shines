@@ -302,9 +302,9 @@ function ClientDetailPage() {
                             onClick={async () => {
                               setScanning(true);
                               try {
-                                const result = await triggerEmailScan({ data: { clientId } });
+                                const result = await triggerEmailScan({ data: { clientId, month: viewMonth, year: viewYear } });
                                 queryClient.invalidateQueries({ queryKey: ["client", clientId] });
-                                toast.success(`Synchronizácia dokončená (${result.processed} dokladov)`);
+                                toast.success(`Synchronizácia ${MONTH_NAMES[viewMonth - 1].toLowerCase()} ${viewYear}: ${result.processed} dokladov, ${result.skipped ?? 0} preskočených`);
                               } catch {
                                 toast.error("Nepodarilo sa synchronizovať e-maily");
                               } finally {
@@ -489,10 +489,9 @@ function ClientDetailPage() {
                             <GripVertical className="h-2.5 w-2.5 text-muted-foreground" />
                           </div>
                         </div>
-                        {doc.document_type && (
-                          <p className="text-[9px] text-primary font-medium mb-0.5">{docTypeLabels[doc.document_type] || doc.document_type}</p>
-                        )}
-                        <p className="text-xs font-medium truncate">{doc.supplier_name || doc.file_name || "Neznámy"}</p>
+                        <p className="text-[9px] text-primary font-medium mb-0.5 truncate">{docTypeLabels[doc.document_type] || "Nezaradený doklad"}</p>
+                        <p className="text-xs font-medium truncate">{doc.supplier_name || doc.clients?.company_name || doc.clients?.name || "Partner neextrahovaný"}</p>
+                        <p className="text-[10px] text-muted-foreground truncate mt-0.5">{doc.file_name || "Bez názvu súboru"}</p>
                         <div className="flex items-center justify-between mt-0.5">
                           <p className="text-[10px] text-muted-foreground">
                             {doc.total_amount ? `${Number(doc.total_amount).toLocaleString("sk-SK")} €` : "—"}
