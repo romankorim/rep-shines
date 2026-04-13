@@ -251,50 +251,92 @@ serve(async (req) => {
     let processedCount = 0;
     let skippedCount = 0;
 
+    // Collect all candidate attachments across all messages first
+    type CandidateAttachment = {
+      msg: any;
+      att: any;
+      emailSubject: string;
+      emailFrom: string;
+      isPdf: boolean;
+    };
+    const allCandidates: CandidateAttachment[] = [];
+
     for (const msg of messagesToProcess) {
       if (!msg.attachments || msg.attachments.length === 0) continue;
 
       const emailSubject = msg.subject || "";
       const emailFrom = msg.from?.[0]?.email || msg.from?.[0]?.name || "";
 
-      // Step 1: Quick pre-filter (remove obviously irrelevant stuff before sending to AI)
-      const candidateAttachments: typeof msg.attachments = [];
-
       for (const att of msg.attachments) {
         const filename = att.filename || "";
         const contentType = normalizeMimeType(att.content_type);
 
-        // Skip inline images (email signatures, logos embedded in HTML)
-        if (att.content_disposition === "inline") {
-          skippedCount++;
-          continue;
-        }
+        if (att.content_disposition === "inline") { skippedCount++; continue; }
+        if (ALWAYS_SKIP_CONTENT_TYPES.some((t) => contentType.includes(t))) { skippedCount++; continue; }
+        if (att.size && att.size < 3000) { skippedCount++; continue; }
 
-        // Skip obviously non-document types (video, audio, zip, pptx)
-        if (ALWAYS_SKIP_CONTENT_TYPES.some((t) => contentType.includes(t))) {
-          console.log(`Pre-filter skip: ${filename} (${contentType})`);
-          skippedCount++;
-          continue;
-        }
+        const isPdf = contentType === "application/pdf";
+        allCandidates.push({ msg, att, emailSubject, emailFrom, isPdf });
+      }
+    }
 
-        // Skip extremely tiny files (< 3KB — tracking pixels, tiny icons)
-        if (att.size && att.size < 3000) {
-          console.log(`Pre-filter skip tiny: ${filename} (${att.size}B)`);
-          skippedCount++;
-          continue;
-        }
+    // Sort: PDFs first (they're most likely invoices and don't need vision AI)
+    allCandidates.sort((a, b) => (b.isPdf ? 1 : 0) - (a.isPdf ? 1 : 0));
 
-        candidateAttachments.push(att);
+    console.log(`Candidates: ${allCandidates.length} (${allCandidates.filter(c => c.isPdf).length} PDFs)`);
+
+    for (const candidate of allCandidates) {
+      const { msg, att, emailSubject, emailFrom, isPdf } = candidate;
+      const normalizedMimeType = normalizeMimeType(att.content_type);
+      const filename = att.filename || "";
+      const sourceEmailId = `nylas:${msg.id}:${att.id}`;
+
+      // Check if already exists
+      const { data: existing } = await supabase
+        .from("documents")
+        .select("id, status, document_type, supplier_name, total_amount, issue_date, ai_confidence")
+        .eq("source_email_id", sourceEmailId)
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        const existingDoc = existing[0];
+        const shouldRefreshExisting =
+          existingDoc.status === "error" ||
+          existingDoc.status === "processing" ||
+          existingDoc.status === "rejected" ||
+          (existingDoc.status !== "approved" && (
+            !existingDoc.document_type ||
+            !existingDoc.supplier_name ||
+            existingDoc.total_amount == null ||
+            !existingDoc.issue_date ||
+            (existingDoc.ai_confidence ?? 0) < 70
+          ));
+
+        if (shouldRefreshExisting) {
+          const anonKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY");
+          if (anonKey) {
+            const retryResp = await fetch(`${supabaseUrl}/functions/v1/extract-document`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${anonKey}` },
+              body: JSON.stringify({ documentId: existingDoc.id }),
+            });
+            if (!retryResp.ok) {
+              console.error("Retry extraction failed:", existingDoc.id, retryResp.status);
+            } else {
+              processedCount++;
+            }
+          }
+        }
+        continue;
       }
 
-      if (candidateAttachments.length === 0) continue;
+      // For PDFs: skip AI classification entirely — accept by default
+      // For images: use AI vision to classify
+      let isRelevant = true;
+      let skipReason = "";
 
-      // Step 2: Process every candidate using the actual file content.
-      // This avoids false negatives from generic subjects/filenames.
-      for (const att of candidateAttachments) {
-        const normalizedMimeType = normalizeMimeType(att.content_type);
-        const filename = att.filename || "";
-
+      if (!isPdf) {
+        // Download and classify with AI vision
         const dlResp = await fetch(
           `${NYLAS_API}/grants/${grantId}/attachments/${att.id}/download?message_id=${msg.id}`,
           { headers: { Authorization: `Bearer ${nylasApiKey}` } },
@@ -308,96 +350,9 @@ serve(async (req) => {
         const fileBuffer = await dlResp.arrayBuffer();
         const fileBytes = new Uint8Array(fileBuffer);
         const visualClassification = await classifyAttachmentByContent(
-          {
-            filename,
-            content_type: normalizedMimeType,
-            size: att.size || fileBytes.length,
-            bytes: fileBytes,
-          },
-          emailSubject,
-          emailFrom,
-          lovableApiKey,
+          { filename, content_type: normalizedMimeType, size: att.size || fileBytes.length, bytes: fileBytes },
+          emailSubject, emailFrom, lovableApiKey,
         );
-
-        const sourceEmailId = `nylas:${msg.id}:${att.id}`;
-        const { data: existing } = await supabase
-          .from("documents")
-          .select("id, status, document_type, supplier_name, total_amount, issue_date, ai_confidence")
-          .eq("source_email_id", sourceEmailId)
-          .limit(1);
-
-        if (existing && existing.length > 0) {
-          const existingDoc = existing[0];
-          const shouldRefreshExisting =
-            existingDoc.status === "error" ||
-            existingDoc.status === "processing" ||
-            existingDoc.status === "rejected" ||
-            (existingDoc.status !== "approved" && (
-              !existingDoc.document_type ||
-              !existingDoc.supplier_name ||
-              existingDoc.total_amount == null ||
-              !existingDoc.issue_date ||
-              (existingDoc.ai_confidence ?? 0) < 70
-            ));
-
-          if (!visualClassification.relevant) {
-            if (existingDoc.status === "approved") {
-              console.log(`AI kept approved doc unchanged: ${filename}`);
-              continue;
-            }
-
-            console.log(`AI skip existing: ${filename} — ${visualClassification.reason}`);
-            await supabase
-              .from("documents")
-              .update({
-                status: "rejected",
-                document_type: null,
-                supplier_name: null,
-                supplier_ico: null,
-                supplier_dic: null,
-                supplier_ic_dph: null,
-                document_number: null,
-                variable_symbol: null,
-                issue_date: null,
-                due_date: null,
-                delivery_date: null,
-                total_amount: null,
-                currency: null,
-                tax_base: null,
-                vat_amount: null,
-                vat_rate: null,
-                vat_breakdown: null,
-                expense_category: null,
-                ai_confidence: 0,
-                ai_raw_data: { reason: visualClassification.reason, filtered_by_agent: true },
-              })
-              .eq("id", existingDoc.id);
-            skippedCount++;
-            continue;
-          }
-
-          if (shouldRefreshExisting) {
-            const anonKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY");
-            if (anonKey) {
-              const retryResp = await fetch(`${supabaseUrl}/functions/v1/extract-document`, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  Authorization: `Bearer ${anonKey}`,
-                },
-                body: JSON.stringify({ documentId: existingDoc.id }),
-              });
-              if (!retryResp.ok) {
-                console.error("Retry extraction failed:", existingDoc.id, retryResp.status, await retryResp.text());
-              } else {
-                processedCount++;
-              }
-            }
-            console.log(`AI refreshed existing: ${filename}`);
-          }
-
-          continue;
-        }
 
         if (!visualClassification.relevant) {
           console.log(`AI skip: ${filename} — ${visualClassification.reason}`);
@@ -405,63 +360,102 @@ serve(async (req) => {
           continue;
         }
 
-        const ext = filename.split(".").pop() || "pdf";
+        // Upload the already-downloaded file
+        const ext = filename.split(".").pop() || "bin";
         const storagePath = `${clientId}/${Date.now()}_email_${Math.random().toString(36).slice(2)}.${ext}`;
-
-        console.log(`AI accepted: ${filename} — ${visualClassification.reason} (${visualClassification.signal})`);
 
         const { error: uploadError } = await supabase.storage
           .from("documents")
-          .upload(storagePath, fileBytes, {
-            contentType: normalizedMimeType,
-          });
+          .upload(storagePath, fileBytes, { contentType: normalizedMimeType });
 
-        if (uploadError) {
-          console.error("Storage upload failed:", uploadError);
-          continue;
-        }
+        if (uploadError) { console.error("Storage upload failed:", uploadError); continue; }
 
         const { data: urlData } = supabase.storage.from("documents").getPublicUrl(storagePath);
 
         const { data: doc, error: insertError } = await supabase
           .from("documents")
           .insert({
-            client_id: clientId,
-            office_id: officeId,
+            client_id: clientId, office_id: officeId,
             file_name: filename || `email_attachment.${ext}`,
             file_size: att.size || fileBytes.length,
             file_type: normalizedMimeType,
             file_url: urlData.publicUrl,
-            source: "email",
-            source_email_id: sourceEmailId,
-            status: "processing",
+            source: "email", source_email_id: sourceEmailId, status: "processing",
           })
-          .select()
-          .single();
+          .select().single();
 
-        if (insertError) {
-          console.error("Document insert failed:", insertError);
-          continue;
-        }
+        if (insertError) { console.error("Document insert failed:", insertError); continue; }
 
         if (doc) {
           const anonKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY");
           if (anonKey) {
-            const extractResp = await fetch(`${supabaseUrl}/functions/v1/extract-document`, {
+            fetch(`${supabaseUrl}/functions/v1/extract-document`, {
               method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${anonKey}`,
-              },
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${anonKey}` },
               body: JSON.stringify({ documentId: doc.id }),
-            });
-            if (!extractResp.ok) console.error("Failed to trigger extraction:", doc.id, extractResp.status, await extractResp.text());
+            }).catch(e => console.error("Extract trigger failed:", e));
           }
         }
 
         processedCount++;
-        console.log(`Processed: ${filename} from "${emailSubject}"`);
+        console.log(`Processed image: ${filename} from "${emailSubject}"`);
+        continue;
       }
+
+      // PDF path — download, upload, extract (no AI classification needed)
+      const dlResp = await fetch(
+        `${NYLAS_API}/grants/${grantId}/attachments/${att.id}/download?message_id=${msg.id}`,
+        { headers: { Authorization: `Bearer ${nylasApiKey}` } },
+      );
+
+      if (!dlResp.ok) {
+        console.error(`Failed to download PDF ${att.id}:`, dlResp.status);
+        continue;
+      }
+
+      const fileBuffer = await dlResp.arrayBuffer();
+      const fileBytes = new Uint8Array(fileBuffer);
+      const ext = filename.split(".").pop() || "pdf";
+      const storagePath = `${clientId}/${Date.now()}_email_${Math.random().toString(36).slice(2)}.${ext}`;
+
+      console.log(`PDF accepted: ${filename} from "${emailSubject}"`);
+
+      const { error: uploadError } = await supabase.storage
+        .from("documents")
+        .upload(storagePath, fileBytes, { contentType: normalizedMimeType });
+
+      if (uploadError) { console.error("Storage upload failed:", uploadError); continue; }
+
+      const { data: urlData } = supabase.storage.from("documents").getPublicUrl(storagePath);
+
+      const { data: doc, error: insertError } = await supabase
+        .from("documents")
+        .insert({
+          client_id: clientId, office_id: officeId,
+          file_name: filename || `email_attachment.${ext}`,
+          file_size: att.size || fileBytes.length,
+          file_type: normalizedMimeType,
+          file_url: urlData.publicUrl,
+          source: "email", source_email_id: sourceEmailId, status: "processing",
+        })
+        .select().single();
+
+      if (insertError) { console.error("Document insert failed:", insertError); continue; }
+
+      if (doc) {
+        const anonKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY");
+        if (anonKey) {
+          // Fire and forget extraction to save time
+          fetch(`${supabaseUrl}/functions/v1/extract-document`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${anonKey}` },
+            body: JSON.stringify({ documentId: doc.id }),
+          }).catch(e => console.error("Extract trigger failed:", e));
+        }
+      }
+
+      processedCount++;
+      console.log(`Processed PDF: ${filename} from "${emailSubject}"`);
     }
 
     console.log(`Done: processed=${processedCount}, skipped=${skippedCount}`);
