@@ -153,7 +153,7 @@ export const exchangeNylasCode = createServerFn({ method: "POST" })
     const nylasApiKey = process.env.NYLAS_API_KEY;
     if (!nylasClientId || !nylasApiKey) throw new Error("Nylas not configured");
 
-    const callbackUri = `${getAppUrl()}/api/nylas/callback`;
+    const callbackUri = `${getStableAppUrl()}/api/nylas/callback`;
 
     const tokenResp = await fetch("https://api.us.nylas.com/v3/connect/token", {
       method: "POST",
