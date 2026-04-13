@@ -115,9 +115,9 @@ function ClientDetailPage() {
   // Auto-navigate to the period of the most recent document
   useEffect(() => {
     if (initialPeriodSet || !data?.documents?.length) return;
-    const docs = data.documents;
+    const docs = data.documents as any[];
     // Find most recent document by created_at
-    const sorted = [...docs].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    const sorted = [...docs].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     const latest = sorted[0];
     if (latest) {
       const period = (latest.tax_period_month && latest.tax_period_year)
