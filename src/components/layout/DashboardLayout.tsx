@@ -3,6 +3,7 @@ import { useState } from "react";
 import { LayoutDashboard, Users, FileText, Receipt, LogOut, Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
+import { AiChatButton } from "@/components/ai/AiChatButton";
 
 const navItems = [
   { to: "/dashboard", label: "Prehľad", icon: LayoutDashboard },
@@ -113,6 +114,9 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       <main className="mx-auto max-w-7xl px-4 py-4 sm:px-6 sm:py-6">
         {children}
       </main>
+
+      {/* AI Chat FAB */}
+      <AiChatButton />
     </div>
   );
 }
