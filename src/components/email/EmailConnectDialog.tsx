@@ -116,32 +116,45 @@ export function EmailConnectDialog({ open, onOpenChange, clientId, existingEmail
 
           {email.includes("@") && (
             <div className="space-y-2">
-              <Label>Typ e-mailovej služby</Label>
-              {detectedProvider && (
-                <p className="text-xs text-muted-foreground">
-                  Automaticky rozpoznané: <strong>{PROVIDERS.find(p => p.id === detectedProvider)?.label}</strong>
-                </p>
-              )}
-              <div className="grid gap-2">
-                {PROVIDERS.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => setSelectedProvider(p.id)}
-                    className={`flex items-center gap-3 p-3 text-left border transition-colors ${
-                      selectedProvider === p.id
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-muted-foreground/30"
-                    }`}
-                  >
-                    <span className="text-xl">{p.icon}</span>
+              {detectedProvider && detectedProvider !== "imap" ? (
+                <>
+                  <Label>Rozpoznaná služba</Label>
+                  <div className="flex items-center gap-3 p-3 border border-primary bg-primary/5">
+                    <span className="text-xl">{PROVIDERS.find(p => p.id === detectedProvider)?.icon}</span>
                     <div>
-                      <p className="text-sm font-medium">{p.label}</p>
-                      <p className="text-xs text-muted-foreground">{p.desc}</p>
+                      <p className="text-sm font-medium">{PROVIDERS.find(p => p.id === detectedProvider)?.label}</p>
+                      <p className="text-xs text-muted-foreground">Automaticky rozpoznané podľa domény</p>
                     </div>
-                  </button>
-                ))}
-              </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <Label>Typ e-mailovej služby</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Nepodarilo sa automaticky rozpoznať poskytovateľa. Vyberte manuálne:
+                  </p>
+                  <div className="grid gap-2">
+                    {PROVIDERS.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => setSelectedProvider(p.id)}
+                        className={`flex items-center gap-3 p-3 text-left border transition-colors ${
+                          selectedProvider === p.id
+                            ? "border-primary bg-primary/5"
+                            : "border-border hover:border-muted-foreground/30"
+                        }`}
+                      >
+                        <span className="text-xl">{p.icon}</span>
+                        <div>
+                          <p className="text-sm font-medium">{p.label}</p>
+                          <p className="text-xs text-muted-foreground">{p.desc}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           )}
 
