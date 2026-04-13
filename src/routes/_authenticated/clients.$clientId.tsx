@@ -228,8 +228,8 @@ function ClientDetailPage() {
             <CardHeader className="py-2 px-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-xs flex items-center gap-1.5"><Mail className="h-3.5 w-3.5" /> E-mailové účty</CardTitle>
-                <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setEmailDialogOpen(true)}>
-                  <Plus className="h-3 w-3 mr-0.5" /> Pridať
+                <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => setEmailDialogOpen(true)}>
+                  <Plus className="h-3 w-3" />
                 </Button>
               </div>
             </CardHeader>
