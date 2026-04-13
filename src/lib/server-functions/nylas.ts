@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getRequest } from "@tanstack/react-start/server";
+import { getRequest, getRequestHeader } from "@tanstack/react-start/server";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import dns from "node:dns";
@@ -7,10 +7,42 @@ import dns from "node:dns";
 const FALLBACK_APP_URL = "https://id-preview--e35fe031-9c7f-4f24-ac03-1474b0aafb32.lovable.app";
 
 function getAppUrl() {
-  const request = getRequest();
+  const originHeader = getRequestHeader("origin");
+  if (originHeader) {
+    return originHeader;
+  }
 
+  const refererHeader = getRequestHeader("referer");
+  if (refererHeader) {
+    try {
+      return new URL(refererHeader).origin;
+    } catch {
+      // ignore invalid referer
+    }
+  }
+
+  const forwardedHost = getRequestHeader("x-forwarded-host");
+  if (forwardedHost) {
+    const forwardedProto = getRequestHeader("x-forwarded-proto") || "https";
+    return `${forwardedProto}://${forwardedHost}`;
+  }
+
+  const host = getRequestHeader("host");
+  if (host && !host.startsWith("localhost")) {
+    const proto = getRequestHeader("x-forwarded-proto") || "https";
+    return `${proto}://${host}`;
+  }
+
+  const request = getRequest();
   if (request?.url) {
-    return new URL(request.url).origin;
+    try {
+      const origin = new URL(request.url).origin;
+      if (!origin.includes("localhost")) {
+        return origin;
+      }
+    } catch {
+      // ignore invalid request url
+    }
   }
 
   return process.env.APP_URL || FALLBACK_APP_URL;
