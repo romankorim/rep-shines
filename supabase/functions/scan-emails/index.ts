@@ -55,7 +55,7 @@ Pravidlá:
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash-lite",
+        model: "google/gemini-2.5-pro",
         messages: [{ role: "user", content: prompt }],
         response_format: { type: "json_object" },
       }),
@@ -138,7 +138,7 @@ Pravidlá:
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash-lite",
+        model: "google/gemini-2.5-pro",
         messages: [{ role: "user", content: prompt }],
         response_format: { type: "json_object" },
       }),
@@ -313,14 +313,15 @@ serve(async (req) => {
           if (existingDoc.status === "error") {
             const anonKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY");
             if (anonKey) {
-              fetch(`${supabaseUrl}/functions/v1/extract-document`, {
+              const retryResp = await fetch(`${supabaseUrl}/functions/v1/extract-document`, {
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
                   Authorization: `Bearer ${anonKey}`,
                 },
                 body: JSON.stringify({ documentId: existingDoc.id }),
-              }).catch((err) => console.error("Failed to retry extraction:", err));
+              });
+              if (!retryResp.ok) console.error("Retry extraction failed:", existingDoc.id, retryResp.status, await retryResp.text());
               processedCount++;
             }
           }
@@ -381,14 +382,15 @@ serve(async (req) => {
         if (doc) {
           const anonKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY");
           if (anonKey) {
-            fetch(`${supabaseUrl}/functions/v1/extract-document`, {
+            const extractResp = await fetch(`${supabaseUrl}/functions/v1/extract-document`, {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
                 Authorization: `Bearer ${anonKey}`,
               },
               body: JSON.stringify({ documentId: doc.id }),
-            }).catch((err) => console.error("Failed to trigger extraction:", err));
+            });
+            if (!extractResp.ok) console.error("Failed to trigger extraction:", doc.id, extractResp.status, await extractResp.text());
           }
         }
 

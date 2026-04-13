@@ -1,18 +1,38 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
-async function attachSignedPreviewUrls(supabase: any, documents: any[]) {
+function getDocumentsStoragePath(url?: string | null) {
+  if (!url) return null;
+  const publicMarker = "/storage/v1/object/public/documents/";
+  const signedMarker = "/storage/v1/object/sign/documents/";
+
+  if (url.includes(publicMarker)) return url.split(publicMarker)[1]?.split("?")[0] || null;
+  if (url.includes(signedMarker)) return url.split(signedMarker)[1]?.split("?")[0] || null;
+
+  return null;
+}
+
+async function attachSignedPreviewUrls(documents: any[]) {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRoleKey) return documents;
+
+  const supabaseAdmin = createSupabaseClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
   return Promise.all(
     documents.map(async (doc) => {
       const nextDoc = { ...doc };
       const candidates = [doc.file_url, doc.thumbnail_url].filter(Boolean) as string[];
 
       for (const originalUrl of candidates) {
-        const storagePath = originalUrl.split("/storage/v1/object/public/documents/")[1];
+        const storagePath = getDocumentsStoragePath(originalUrl);
         if (!storagePath) continue;
 
-        const { data } = await supabase.storage.from("documents").createSignedUrl(storagePath, 60 * 60);
+        const { data } = await supabaseAdmin.storage.from("documents").createSignedUrl(storagePath, 60 * 60);
         if (!data?.signedUrl) continue;
 
         if (originalUrl === doc.file_url) nextDoc.file_url = data.signedUrl;
@@ -45,7 +65,7 @@ export const getDocuments = createServerFn({ method: "GET" })
       .order("created_at", { ascending: false });
 
     if (error) throw new Error(error.message);
-    return attachSignedPreviewUrls(supabase, data ?? []);
+    return attachSignedPreviewUrls(data ?? []);
   });
 
 export const updateDocumentStatus = createServerFn({ method: "POST" })
