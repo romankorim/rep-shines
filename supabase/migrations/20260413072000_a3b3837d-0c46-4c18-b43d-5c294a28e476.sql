@@ -1,0 +1,1 @@
+ALTER TABLE public.documents ADD CONSTRAINT documents_source_email_id_key UNIQUE (source_email_id);
