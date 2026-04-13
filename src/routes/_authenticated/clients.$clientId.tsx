@@ -56,6 +56,11 @@ const MONTH_NAMES = [
   "Júl", "August", "September", "Október", "November", "December",
 ];
 
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
+}
+
 function ClientDetailPage() {
   const { clientId } = Route.useParams();
   const { nylas_code, bank_connected, connection_id } = Route.useSearch();
@@ -304,10 +309,10 @@ function ClientDetailPage() {
                               setScanning(true);
                               try {
                                 const result = await triggerEmailScan({ data: { clientId, month: viewMonth, year: viewYear } });
-                                queryClient.invalidateQueries({ queryKey: ["client", clientId] });
+                                await queryClient.invalidateQueries({ queryKey: ["client", clientId] });
                                 toast.success(`Synchronizácia ${MONTH_NAMES[viewMonth - 1].toLowerCase()} ${viewYear}: ${result.processed} dokladov, ${result.skipped ?? 0} preskočených`);
-                              } catch {
-                                toast.error("Nepodarilo sa synchronizovať e-maily");
+                              } catch (error) {
+                                toast.error(getErrorMessage(error, "Nepodarilo sa synchronizovať e-maily"));
                               } finally {
                                 setScanning(false);
                               }
@@ -328,13 +333,32 @@ function ClientDetailPage() {
                               if (!confirmed) return;
 
                               setScanning(true);
+                              let deletedCount = 0;
+
                               try {
                                 const resetResult = await resetEmailSyncPeriod({ data: { clientId, month: viewMonth, year: viewYear } });
+                                deletedCount = resetResult.deleted;
+
+                                if (selectedDoc?.source === "email") {
+                                  const selectedPeriod = getDocPeriod(selectedDoc);
+                                  if (selectedPeriod.month === viewMonth && selectedPeriod.year === viewYear) {
+                                    setSelectedDoc(null);
+                                  }
+                                }
+
+                                await queryClient.invalidateQueries({ queryKey: ["client", clientId] });
+
                                 const scanResult = await triggerEmailScan({ data: { clientId, month: viewMonth, year: viewYear } });
-                                queryClient.invalidateQueries({ queryKey: ["client", clientId] });
+                                await queryClient.invalidateQueries({ queryKey: ["client", clientId] });
                                 toast.success(`Reset: ${resetResult.deleted} zmazaných importov, nová synchronizácia: ${scanResult.processed} dokladov`);
-                              } catch {
-                                toast.error("Nepodarilo sa spraviť reset a novú extrakciu")
+                              } catch (error) {
+                                await queryClient.invalidateQueries({ queryKey: ["client", clientId] });
+
+                                if (deletedCount > 0) {
+                                  toast.warning(`Import za ${MONTH_NAMES[viewMonth - 1].toLowerCase()} ${viewYear} bol zmazaný (${deletedCount}), ale nový scan zlyhal: ${getErrorMessage(error, "Neznáma chyba")}`);
+                                } else {
+                                  toast.error(getErrorMessage(error, "Nepodarilo sa spraviť reset a novú extrakciu"));
+                                }
                               } finally {
                                 setScanning(false);
                               }
