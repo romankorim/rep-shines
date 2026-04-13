@@ -70,8 +70,9 @@ function ClientDetailPage() {
   const [draggedDocId, setDraggedDocId] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
-  const [viewYear, setViewYear] = useState<number | null>(null);
-  const [viewMonth, setViewMonth] = useState<number | null>(null);
+  const now = new Date();
+  const [viewYear, setViewYear] = useState(now.getFullYear());
+  const [viewMonth, setViewMonth] = useState(now.getMonth() + 1);
   const [initialPeriodSet, setInitialPeriodSet] = useState(false);
 
   // Handle Nylas OAuth callback
