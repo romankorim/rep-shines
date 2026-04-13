@@ -253,48 +253,53 @@ function ClientDetailPage() {
                       <Mail className="h-4 w-4 shrink-0 text-muted-foreground" />
                     );
                     return (
-                      <div key={ei.id} className="flex items-center gap-2 px-2 py-1.5 border border-border bg-muted/20">
-                        {providerLogo}
-                        <span className="text-xs font-medium truncate flex-1">{ei.email_address || "Neznámy"}</span>
-                        {ei.last_sync_at && (
-                          <span className="text-[9px] text-muted-foreground shrink-0">
-                            {new Date(ei.last_sync_at).toLocaleDateString("sk-SK")}
-                          </span>
-                        )}
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-5 w-5 shrink-0 text-muted-foreground hover:text-foreground"
-                          title="Synchronizovať e-maily"
-                          onClick={async () => {
-                            try {
-                              const result = await triggerEmailScan({ data: { clientId } });
-                              queryClient.invalidateQueries({ queryKey: ["client", clientId] });
-                              toast.success(`Synchronizácia dokončená (${result.processed} dokladov)`);
-                            } catch {
-                              toast.error("Nepodarilo sa synchronizovať e-maily");
-                            }
-                          }}
-                        >
-                          <RefreshCw className="h-3 w-3" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-5 w-5 shrink-0 text-destructive hover:text-destructive"
-                          title="Odpojiť e-mail"
-                          onClick={async () => {
-                            try {
-                              await disconnectEmail({ data: { clientId } });
-                              queryClient.invalidateQueries({ queryKey: ["client", clientId] });
-                              toast.success("E-mail odpojený");
-                            } catch {
-                              toast.error("Nepodarilo sa odpojiť e-mail");
-                            }
-                          }}
-                        >
-                          <X className="h-3 w-3" />
-                        </Button>
+                      <div key={ei.id} className="flex items-center justify-between gap-3 px-2 py-1.5 border border-border bg-muted/20">
+                        <div className="flex items-center gap-2 min-w-0 basis-1/2 max-w-1/2 shrink">
+                          {providerLogo}
+                          <span className="text-xs font-medium truncate">{ei.email_address || "Neznámy"}</span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {ei.last_sync_at && (
+                            <span className="text-[9px] text-muted-foreground shrink-0 mr-1">
+                              {new Date(ei.last_sync_at).toLocaleDateString("sk-SK")}
+                            </span>
+                          )}
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                            title="Synchronizovať e-maily"
+                            onClick={async () => {
+                              try {
+                                const result = await triggerEmailScan({ data: { clientId } });
+                                queryClient.invalidateQueries({ queryKey: ["client", clientId] });
+                                toast.success(`Synchronizácia dokončená (${result.processed} dokladov)`);
+                              } catch {
+                                toast.error("Nepodarilo sa synchronizovať e-maily");
+                              }
+                            }}
+                          >
+                            <RefreshCw className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6 shrink-0 text-destructive hover:text-destructive"
+                            title="Odpojiť e-mail"
+                            onClick={async () => {
+                              try {
+                                await disconnectEmail({ data: { clientId } });
+                                queryClient.invalidateQueries({ queryKey: ["client", clientId] });
+                                toast.success("E-mail odpojený");
+                              } catch {
+                                toast.error("Nepodarilo sa odpojiť e-mail");
+                              }
+                            }}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
                       </div>
                     );
                   })}
