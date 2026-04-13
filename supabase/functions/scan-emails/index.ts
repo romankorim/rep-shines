@@ -58,7 +58,7 @@ function arrayBufferToBase64(buf: ArrayBuffer) {
 }
 
 async function sha256(data: Uint8Array): Promise<string> {
-  const hash = await crypto.subtle.digest("SHA-256", data);
+  const hash = await crypto.subtle.digest("SHA-256", data.buffer as ArrayBuffer);
   return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
@@ -769,7 +769,7 @@ serve(async (req) => {
         updated_at: new Date().toISOString(),
       }, { onConflict: "office_id,sender_domain" });
       // Increment counter (upsert doesn't support increment, so we do it manually)
-      await supabase.rpc("increment_sender_emails_seen", { p_office_id: officeId, p_domain: domain, p_count: count }).catch(() => {});
+      try { await supabase.rpc("increment_sender_emails_seen", { p_office_id: officeId, p_domain: domain, p_count: count }); } catch (_) { /* ignore */ }
     }
 
     // Update sync timestamp
