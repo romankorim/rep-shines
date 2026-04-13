@@ -6,6 +6,10 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+function normalizeMimeType(contentType?: string | null) {
+  return contentType?.split(";")[0]?.trim().toLowerCase() || "application/octet-stream";
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -54,8 +58,9 @@ serve(async (req) => {
     }
 
     let fileContent: any = null;
-    const isImage = doc.file_type?.startsWith("image/");
-    const isPdf = doc.file_type === "application/pdf";
+    const normalizedFileType = normalizeMimeType(doc.file_type);
+    const isImage = normalizedFileType.startsWith("image/");
+    const isPdf = normalizedFileType === "application/pdf";
 
     if (isImage && fileUrl) {
       try {
@@ -70,7 +75,7 @@ serve(async (req) => {
 
           fileContent = {
             type: "image_url",
-            image_url: { url: `data:${doc.file_type || "image/jpeg"};base64,${btoa(binary)}` },
+            image_url: { url: `data:${normalizedFileType || "image/jpeg"};base64,${btoa(binary)}` },
           };
         }
       } catch (e) {
@@ -83,11 +88,13 @@ serve(async (req) => {
       };
     }
 
-    const systemPrompt = `Si expert na extrahovanie dát z účtovných dokladov (faktúry, účtenky, dobropisy) pre slovenské a české firmy.
+    const systemPrompt = `Si expert na OCR a extrahovanie dát z účtovných dokladov (faktúry, účtenky, dobropisy) pre slovenské a české firmy.
 
     Analyzuj priložený doklad a extrahuj VŠETKY dostupné údaje. Použi tool calling na vrátenie štruktúrovaných dát.
 
     Pravidlá:
+    - Ak je vstup fotka alebo sken, najprv sprav dôkladné OCR celého dokumentu a až potom extrahuj polia
+    - Ignoruj pozadie, tiene a perspektívu; čítaj aj slabšie viditeľný text, ak je rozpoznateľný
     - Dátumy formátuj ako YYYY-MM-DD
     - Sumy ako čísla (bez meny a medzier)
     - IČO, DIČ, IČ DPH presne ako na doklade
@@ -114,7 +121,7 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: "google/gemini-2.5-pro",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userMessage },
