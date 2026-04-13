@@ -8,97 +8,181 @@ const corsHeaders = {
 
 const NYLAS_API = "https://api.us.nylas.com/v3";
 
-// Only these file types can be accounting documents
-const ACCOUNTING_CONTENT_TYPES = [
-  "application/pdf",
-  "image/jpeg",
-  "image/png",
-  "image/tiff",
+// Absolute minimum filters — everything else goes to AI
+const ALWAYS_SKIP_CONTENT_TYPES = [
+  "application/zip", "application/x-zip",
+  "video/", "audio/",
+  "application/vnd.openxmlformats-officedocument.presentationml",
+  "application/vnd.ms-powerpoint",
 ];
 
-const ACCOUNTING_EXTENSIONS = [".pdf", ".jpg", ".jpeg", ".png", ".tiff"];
+/**
+ * Uses AI to classify whether an email attachment is likely an accounting document.
+ * Returns { relevant: boolean, reason: string }
+ */
+async function classifyAttachmentWithAI(
+  attachment: { filename: string; content_type: string; size: number },
+  emailSubject: string,
+  emailFrom: string,
+  lovableApiKey: string,
+): Promise<{ relevant: boolean; reason: string }> {
+  const prompt = `Rozhodneš, či príloha e-mailu je účtovný doklad relevantný pre účtovníctvo (faktúra, účtenka, dobropis, výpis, zmluva, poistka, daňový doklad, mzdový doklad, avízo, upomienka, zálohová faktúra, proforma, dodací list, objednávka, potvrdenie platby, alebo iný finančný/účtovný dokument).
 
-// Filenames that are almost certainly NOT accounting documents
-const JUNK_FILENAME_PATTERNS = [
-  /^image\d*\.\w+$/i,           // image.png, image001.png
-  /^photo\d*\.\w+$/i,           // photo.png
-  /^img[-_]?\d*\.\w+$/i,        // img_001.png
-  /^logo\.\w+$/i,               // logo.png
-  /^banner\.\w+$/i,             // banner.png
-  /^signature\.\w+$/i,          // signature.png
-  /^header\.\w+$/i,             // header.png
-  /^footer\.\w+$/i,             // footer.png
-  /^icon\.\w+$/i,               // icon.png
-  /^avatar\.\w+$/i,             // avatar.png
-  /^screenshot/i,               // screenshot*, Zrzut ekranu*
-  /^zrzut/i,                    // Zrzut ekranu (Polish for screenshot)
-  /^snímka/i,                   // Snímka obrazovky (SK for screenshot)
-  /^capture/i,                  // Screen capture
-  /^popis/i,                    // "popis" = description (marketing images)
-  /^kreativ/i,                  // "kreativa" = creative assets
-  /^citatel/i,                  // "citatelne" = readability tests
-  /^text.cez/i,                 // "text cez produkt" = text over product
-  /^produkt/i,                  // product images
-  /^cover/i,                    // cover images
-  /^thumbnail/i,                // thumbnails
-  /^preview/i,                  // preview images
-];
+E-mail:
+- Predmet: "${emailSubject || "(žiadny)"}"
+- Odosielateľ: "${emailFrom || "(neznámy)"}"
 
-// Subject keywords that indicate accounting-relevant emails
-const ACCOUNTING_SUBJECT_KEYWORDS = [
-  "faktúra", "faktura", "invoice",
-  "dobropis", "credit note",
-  "účtenka", "účet", "uctenka", "ucet", "receipt",
-  "platba", "payment",
-  "objednávka", "objednavka", "order",
-  "zmluva", "contract",
-  "výpis", "vypis", "statement",
-  "daň", "dan", "tax",
-  "dph", "vat",
-  "poistenie", "insurance",
-  "nájom", "najom", "rent",
-  "mzda", "salary", "payroll",
-  "výplata", "vyplata",
-  "avízo", "avizo",
-  "upomienka", "reminder",
-  "penále", "penale", "penalty",
-  "zálohová", "zalohova", "advance",
-  "proforma",
-];
+Príloha:
+- Názov súboru: "${attachment.filename || "(bez názvu)"}"
+- Typ: "${attachment.content_type || "neznámy"}"
+- Veľkosť: ${attachment.size || 0} bytes
 
-// Filename keywords that suggest accounting documents
-const ACCOUNTING_FILENAME_KEYWORDS = [
-  "faktur", "invoice", "inv",
-  "dobropis", "credit",
-  "ucten", "receipt",
-  "vypis", "statement",
-  "zmluv", "contract",
-  "dph", "vat",
-  "poistk", "insur",
-  "najom", "rent",
-  "mzd", "payroll", "salary",
-  "proforma",
-  "avizo",
-  "upomienk",
-  "potvrd", "confirm",
-  "dan", "tax",
-];
+Odpovedz IBA v JSON formáte:
+{"relevant": true/false, "reason": "stručné vysvetlenie prečo áno/nie"}
 
-function isJunkFilename(filename: string): boolean {
-  if (!filename) return true;
-  return JUNK_FILENAME_PATTERNS.some((p) => p.test(filename));
+Pravidlá:
+- PDF prílohy sú TAKMER VŽDY relevantné (faktúry, zmluvy, výpisy) — označ ako relevant=true pokiaľ nemáš silný dôvod prečo nie (napr. prezentácia, návod, marketingový materiál)
+- Obrázky môžu byť fotky účteniek, dokladov — ak názov alebo kontext naznačuje účtovníctvo, označ relevant=true
+- Logá, podpisy, screenshoty, profilové obrázky, marketingové materiály → relevant=false
+- Ak si nie si istý, radšej označ relevant=true (falošné pozitívy sú lepšie než vynechané doklady)
+- Prezentácie (.pptx), videá, audio súbory → relevant=false`;
+
+  try {
+    const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${lovableApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash-lite",
+        messages: [{ role: "user", content: prompt }],
+        response_format: { type: "json_object" },
+      }),
+    });
+
+    if (!resp.ok) {
+      console.error("AI classification failed:", resp.status);
+      // On AI failure, default to accepting the attachment (better safe than sorry)
+      return { relevant: true, reason: "AI classification unavailable, accepting by default" };
+    }
+
+    const result = await resp.json();
+    const content = result.choices?.[0]?.message?.content;
+    if (!content) {
+      return { relevant: true, reason: "Empty AI response, accepting by default" };
+    }
+
+    const parsed = JSON.parse(content);
+    return {
+      relevant: Boolean(parsed.relevant),
+      reason: parsed.reason || "no reason given",
+    };
+  } catch (e) {
+    console.error("AI classify error:", e);
+    return { relevant: true, reason: "AI error, accepting by default" };
+  }
 }
 
-function isAccountingRelevantFilename(filename: string): boolean {
-  if (!filename) return false;
-  const lower = filename.toLowerCase();
-  return ACCOUNTING_FILENAME_KEYWORDS.some((kw) => lower.includes(kw));
-}
+/**
+ * Batch-classify multiple attachments from the same email in one AI call.
+ */
+async function classifyAttachmentsBatch(
+  attachments: Array<{ filename: string; content_type: string; size: number; id: string }>,
+  emailSubject: string,
+  emailFrom: string,
+  lovableApiKey: string,
+): Promise<Map<string, { relevant: boolean; reason: string }>> {
+  const results = new Map<string, { relevant: boolean; reason: string }>();
 
-function isAccountingRelevantSubject(subject: string): boolean {
-  if (!subject) return false;
-  const lower = subject.toLowerCase();
-  return ACCOUNTING_SUBJECT_KEYWORDS.some((kw) => lower.includes(kw));
+  if (attachments.length === 0) return results;
+
+  // For a single attachment, use the simple call
+  if (attachments.length === 1) {
+    const att = attachments[0];
+    const result = await classifyAttachmentWithAI(att, emailSubject, emailFrom, lovableApiKey);
+    results.set(att.id, result);
+    return results;
+  }
+
+  // For multiple attachments, batch them in one prompt
+  const attachmentList = attachments
+    .map((a, i) => `${i + 1}. Súbor: "${a.filename || "(bez názvu)"}", Typ: "${a.content_type}", Veľkosť: ${a.size || 0}B`)
+    .join("\n");
+
+  const prompt = `Si AI agent pre účtovnícku firmu. Rozhodneš, ktoré prílohy e-mailu sú účtovné doklady.
+
+E-mail:
+- Predmet: "${emailSubject || "(žiadny)"}"
+- Odosielateľ: "${emailFrom || "(neznámy)"}"
+
+Prílohy:
+${attachmentList}
+
+Pre KAŽDÚ prílohu rozhodneš či je relevantná pre účtovníctvo (faktúra, účtenka, dobropis, výpis, zmluva, poistka, daňový doklad, mzdový doklad, avízo, zálohová faktúra, proforma, dodací list, objednávka, potvrdenie platby, alebo iný finančný/účtovný dokument).
+
+Odpovedz IBA v JSON formáte:
+{"results": [{"index": 1, "relevant": true/false, "reason": "..."}]}
+
+Pravidlá:
+- PDF → takmer vždy relevant=true (pokiaľ to nie je zjavne prezentácia/návod/marketing)
+- Obrázky s účtovným kontextom (fotka účtenky, scan faktúry) → relevant=true
+- Logá, podpisy, screenshoty, profilové obrázky, marketingové materiály → relevant=false
+- Ak si nie si istý → relevant=true (radšej zahrnieš než vynecháš)`;
+
+  try {
+    const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${lovableApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash-lite",
+        messages: [{ role: "user", content: prompt }],
+        response_format: { type: "json_object" },
+      }),
+    });
+
+    if (!resp.ok) {
+      // Default: accept all
+      for (const att of attachments) {
+        results.set(att.id, { relevant: true, reason: "AI unavailable, accepting by default" });
+      }
+      return results;
+    }
+
+    const result = await resp.json();
+    const content = result.choices?.[0]?.message?.content;
+    const parsed = JSON.parse(content || "{}");
+
+    if (parsed.results && Array.isArray(parsed.results)) {
+      for (const r of parsed.results) {
+        const idx = (r.index || 1) - 1;
+        if (idx >= 0 && idx < attachments.length) {
+          results.set(attachments[idx].id, {
+            relevant: Boolean(r.relevant),
+            reason: r.reason || "",
+          });
+        }
+      }
+    }
+
+    // Fill in any missing results as relevant (safe default)
+    for (const att of attachments) {
+      if (!results.has(att.id)) {
+        results.set(att.id, { relevant: true, reason: "Not classified, accepting by default" });
+      }
+    }
+
+    return results;
+  } catch (e) {
+    console.error("Batch AI classify error:", e);
+    for (const att of attachments) {
+      results.set(att.id, { relevant: true, reason: "AI error, accepting by default" });
+    }
+    return results;
+  }
 }
 
 serve(async (req) => {
@@ -116,6 +200,7 @@ serve(async (req) => {
     const nylasApiKey = Deno.env.get("NYLAS_API_KEY")!;
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const lovableApiKey = Deno.env.get("LOVABLE_API_KEY")!;
     const supabase = createClient(supabaseUrl, serviceRoleKey);
 
     let messagesToProcess: any[] = [];
@@ -129,7 +214,6 @@ serve(async (req) => {
         messagesToProcess = [msgData.data];
       }
     } else {
-      // Initial scan - get recent messages with attachments
       const params = new URLSearchParams({
         has_attachment: "true",
         limit: "50",
@@ -157,55 +241,66 @@ serve(async (req) => {
     for (const msg of messagesToProcess) {
       if (!msg.attachments || msg.attachments.length === 0) continue;
 
-      const subjectRelevant = isAccountingRelevantSubject(msg.subject || "");
+      const emailSubject = msg.subject || "";
+      const emailFrom = msg.from?.[0]?.email || msg.from?.[0]?.name || "";
+
+      // Step 1: Quick pre-filter (remove obviously irrelevant stuff before sending to AI)
+      const candidateAttachments: typeof msg.attachments = [];
 
       for (const att of msg.attachments) {
         const filename = att.filename || "";
+        const contentType = att.content_type || "";
 
-        // 1. Skip inline images (email signatures, logos embedded in HTML)
+        // Skip inline images (email signatures, logos embedded in HTML)
         if (att.content_disposition === "inline") {
-          console.log(`Skipped inline: ${filename}`);
           skippedCount++;
           continue;
         }
 
-        // 2. Filter by content type or extension
-        const isRelevantType = ACCOUNTING_CONTENT_TYPES.some((t) => att.content_type?.includes(t));
-        const isRelevantExt = ACCOUNTING_EXTENSIONS.some((ext) => filename.toLowerCase().endsWith(ext));
-        if (!isRelevantType && !isRelevantExt) {
-          console.log(`Skipped non-doc type: ${filename} (${att.content_type})`);
+        // Skip obviously non-document types (video, audio, zip, pptx)
+        if (ALWAYS_SKIP_CONTENT_TYPES.some((t) => contentType.includes(t))) {
+          console.log(`Pre-filter skip: ${filename} (${contentType})`);
           skippedCount++;
           continue;
         }
 
-        // 3. Skip tiny files (< 10KB — likely icons, signatures, tracking pixels)
-        if (att.size && att.size < 10000) {
-          console.log(`Skipped tiny file: ${filename} (${att.size} bytes)`);
+        // Skip extremely tiny files (< 3KB — tracking pixels, tiny icons)
+        if (att.size && att.size < 3000) {
+          console.log(`Pre-filter skip tiny: ${filename} (${att.size}B)`);
           skippedCount++;
           continue;
         }
 
-        // 4. Skip known junk filenames
-        if (isJunkFilename(filename)) {
-          console.log(`Skipped junk filename: ${filename}`);
+        candidateAttachments.push(att);
+      }
+
+      if (candidateAttachments.length === 0) continue;
+
+      // Step 2: AI classification for all candidates in this email
+      const classifications = await classifyAttachmentsBatch(
+        candidateAttachments.map((a: any) => ({
+          filename: a.filename || "",
+          content_type: a.content_type || "",
+          size: a.size || 0,
+          id: a.id,
+        })),
+        emailSubject,
+        emailFrom,
+        lovableApiKey,
+      );
+
+      // Step 3: Process relevant attachments
+      for (const att of candidateAttachments) {
+        const classification = classifications.get(att.id);
+        if (!classification?.relevant) {
+          console.log(`AI skip: ${att.filename} — ${classification?.reason}`);
           skippedCount++;
           continue;
         }
 
-        // 5. For images (non-PDF), require either accounting-relevant filename OR subject
-        const isPdf = filename.toLowerCase().endsWith(".pdf") || att.content_type?.includes("pdf");
-        if (!isPdf) {
-          const filenameRelevant = isAccountingRelevantFilename(filename);
-          if (!filenameRelevant && !subjectRelevant) {
-            console.log(`Skipped non-accounting image: ${filename} (subject: ${msg.subject})`);
-            skippedCount++;
-            continue;
-          }
-        }
+        console.log(`AI accepted: ${att.filename} — ${classification.reason}`);
 
-        // PDFs are almost always accounting documents, so we accept all PDFs that pass basic checks
-
-        // Check for duplicates; on refresh retry failed extractions instead of skipping silently
+        // Check for duplicates; on refresh retry failed extractions
         const sourceEmailId = `nylas:${msg.id}:${att.id}`;
         const { data: existing } = await supabase
           .from("documents")
@@ -235,7 +330,7 @@ serve(async (req) => {
         // Download attachment from Nylas
         const dlResp = await fetch(
           `${NYLAS_API}/grants/${grantId}/attachments/${att.id}/download?message_id=${msg.id}`,
-          { headers: { Authorization: `Bearer ${nylasApiKey}` } }
+          { headers: { Authorization: `Bearer ${nylasApiKey}` } },
         );
 
         if (!dlResp.ok) {
@@ -245,8 +340,7 @@ serve(async (req) => {
 
         const fileBuffer = await dlResp.arrayBuffer();
         const fileBytes = new Uint8Array(fileBuffer);
-
-        // Upload to Supabase storage
+        const filename = att.filename || "";
         const ext = filename.split(".").pop() || "pdf";
         const storagePath = `${clientId}/${Date.now()}_email_${Math.random().toString(36).slice(2)}.${ext}`;
 
@@ -263,7 +357,6 @@ serve(async (req) => {
 
         const { data: urlData } = supabase.storage.from("documents").getPublicUrl(storagePath);
 
-        // Create document record
         const { data: doc, error: insertError } = await supabase
           .from("documents")
           .insert({
@@ -285,7 +378,6 @@ serve(async (req) => {
           continue;
         }
 
-        // Trigger AI extraction
         if (doc) {
           const anonKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY");
           if (anonKey) {
@@ -301,13 +393,12 @@ serve(async (req) => {
         }
 
         processedCount++;
-        console.log(`Processed: ${filename} from "${msg.subject || "no subject"}"`);
+        console.log(`Processed: ${filename} from "${emailSubject}"`);
       }
     }
 
     console.log(`Done: processed=${processedCount}, skipped=${skippedCount}`);
 
-    // Update last_sync_at
     await supabase
       .from("email_integrations")
       .update({ last_sync_at: new Date().toISOString() })
@@ -315,13 +406,13 @@ serve(async (req) => {
 
     return new Response(
       JSON.stringify({ success: true, processed: processedCount, skipped: skippedCount }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {
     console.error("scan-emails error:", e);
     return new Response(
       JSON.stringify({ error: e instanceof Error ? e.message : "Unknown" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
 });
