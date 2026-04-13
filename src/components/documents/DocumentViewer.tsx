@@ -74,6 +74,7 @@ export function DocumentViewer({ document: doc, open, onOpenChange }: DocumentVi
   const [editing, setEditing] = useState(false);
 
   // Editable fields
+  const [documentType, setDocumentType] = useState("");
   const [supplierName, setSupplierName] = useState("");
   const [supplierIco, setSupplierIco] = useState("");
   const [supplierDic, setSupplierDic] = useState("");
