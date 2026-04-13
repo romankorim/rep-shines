@@ -308,31 +308,40 @@ serve(async (req) => {
         messagesToProcess = [msgData.data];
       }
     } else {
-      const params = new URLSearchParams({
-        has_attachment: "true",
-        limit: "50",
-        fields: "id,subject,from,date,attachments",
-      });
+      let nextCursor: string | null = null;
 
-      if (month && year) {
-        const receivedAfter = Math.floor(Date.UTC(year, month - 1, 1, 0, 0, 0) / 1000);
-        const receivedBefore = Math.floor(Date.UTC(year, month, 1, 0, 0, 0) / 1000);
-        params.set("received_after", String(receivedAfter));
-        params.set("received_before", String(receivedBefore));
-      }
+      do {
+        const params = new URLSearchParams({
+          has_attachment: "true",
+          limit: "50",
+          fields: "id,subject,from,date,attachments",
+        });
 
-      const listResp = await fetch(`${NYLAS_API}/grants/${grantId}/messages?${params}`, {
-        headers: { Authorization: `Bearer ${nylasApiKey}`, Accept: "application/json" },
-      });
+        if (month && year) {
+          const receivedAfter = Math.floor(Date.UTC(year, month - 1, 1, 0, 0, 0) / 1000);
+          const receivedBefore = Math.floor(Date.UTC(year, month, 1, 0, 0, 0) / 1000);
+          params.set("received_after", String(receivedAfter));
+          params.set("received_before", String(receivedBefore));
+        }
 
-      if (!listResp.ok) {
-        const errText = await listResp.text();
-        console.error("Nylas list messages failed:", listResp.status, errText);
-        throw new Error(`Nylas API error: ${listResp.status}`);
-      }
+        if (nextCursor) {
+          params.set("page_token", nextCursor);
+        }
 
-      const listData = await listResp.json();
-      messagesToProcess = listData.data || [];
+        const listResp = await fetch(`${NYLAS_API}/grants/${grantId}/messages?${params}`, {
+          headers: { Authorization: `Bearer ${nylasApiKey}`, Accept: "application/json" },
+        });
+
+        if (!listResp.ok) {
+          const errText = await listResp.text();
+          console.error("Nylas list messages failed:", listResp.status, errText);
+          throw new Error(`Nylas API error: ${listResp.status}`);
+        }
+
+        const listData = await listResp.json();
+        messagesToProcess.push(...(listData.data || []));
+        nextCursor = listData.next_cursor || null;
+      } while (nextCursor);
     }
 
     console.log(`Processing ${messagesToProcess.length} messages for client ${clientId}`);
@@ -422,6 +431,61 @@ serve(async (req) => {
               });
               if (!retryResp.ok) console.error("Retry extraction failed:", existingDoc.id, retryResp.status, await retryResp.text());
               processedCount++;
+            }
+          } else if (["pending_approval", "approved", "rejected"].includes(existingDoc.status)) {
+            const normalizedMimeType = normalizeMimeType(att.content_type);
+            const canInspectVisually = normalizedMimeType === "application/pdf" || normalizedMimeType.startsWith("image/");
+
+            if (canInspectVisually) {
+              const dlResp = await fetch(
+                `${NYLAS_API}/grants/${grantId}/attachments/${att.id}/download?message_id=${msg.id}`,
+                { headers: { Authorization: `Bearer ${nylasApiKey}` } },
+              );
+
+              if (dlResp.ok) {
+                const fileBuffer = await dlResp.arrayBuffer();
+                const fileBytes = new Uint8Array(fileBuffer);
+                const review = await classifyAttachmentByContent(
+                  {
+                    filename: att.filename || "",
+                    content_type: normalizedMimeType,
+                    size: att.size || fileBytes.length,
+                    bytes: fileBytes,
+                  },
+                  emailSubject,
+                  emailFrom,
+                  lovableApiKey,
+                );
+
+                if (!review.relevant) {
+                  await supabase
+                    .from("documents")
+                    .update({
+                      status: "rejected",
+                      document_type: null,
+                      supplier_name: null,
+                      supplier_ico: null,
+                      supplier_dic: null,
+                      supplier_ic_dph: null,
+                      document_number: null,
+                      variable_symbol: null,
+                      issue_date: null,
+                      due_date: null,
+                      delivery_date: null,
+                      total_amount: null,
+                      currency: null,
+                      tax_base: null,
+                      vat_amount: null,
+                      vat_rate: null,
+                      vat_breakdown: null,
+                      expense_category: null,
+                      ai_confidence: 0,
+                      ai_raw_data: { reason: review.reason, filtered_by_agent: true },
+                    })
+                    .eq("id", existingDoc.id);
+                  skippedCount++;
+                }
+              }
             }
           }
           continue;
