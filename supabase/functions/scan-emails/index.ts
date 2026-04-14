@@ -94,12 +94,23 @@ function applyRules(
   if (rule) {
     if (rule.force_exclude) return "skip";
     if (rule.force_include || rule.classification === "trusted_invoicer") return "trusted";
-    if (rule.classification === "newsletter" || rule.classification === "spam") return "skip";
+    if (rule.classification === "newsletter" || rule.classification === "spam" || rule.classification === "marketing") return "skip";
   }
 
   // Heuristic: skip obvious non-accounting
   const subjectLower = subject.toLowerCase();
   if (subjectLower.includes("unsubscribe") || subjectLower.includes("odhlásiť")) return "skip";
+
+  // Skip marketing / promo / social media keywords
+  const marketingKeywords = [
+    "sleva", "zľava", "akcia", "výpredaj", "sale", "promo", "newsletter",
+    "novinky", "nové produkty", "new collection", "doprava zdarma", "free shipping",
+    "instagram", "facebook", "tiktok", "sdílet", "zdieľať", "líbí se", "páči sa",
+    "košík", "nákupný", "objednávka potvrdena", "order confirmed",
+    "nelze sdílet", "nelze sdilet", "nelze sdílet",
+    "pink blush", "beauty", "parfém", "parfum", "kosmetik",
+  ];
+  if (marketingKeywords.some(kw => subjectLower.includes(kw))) return "skip";
 
   return "process";
 }
@@ -130,7 +141,7 @@ Preposlané: ${e.is_forwarded ? "áno" : "nie"}`).join("\n");
 ${emailList}
 
 Pre KAŽDÝ email vráť:
-- is_accounting: true ak email obsahuje alebo JE faktúra, účtenka, dobropis, výpis, potvrdenie platby, objednávka, zmluva, alebo iný účtovný/finančný doklad
+- is_accounting: true ak email obsahuje alebo JE faktúra, účtenka, dobropis, výpis, potvrdenie platby alebo iný účtovný/finančný doklad
 - content_types: pole stratégií extrahovania:
   "attachment" = doklad je v prílohe (PDF, obrázok)
   "inline_image" = fotka dokladu vložená priamo v tele emailu
@@ -144,8 +155,18 @@ DÔLEŽITÉ:
 - Emaily od Uber, Bolt, Booking, Apple, Google, AWS, Stripe = VŽDY is_accounting=true, content_types=["body_invoice"]
 - PDF príloha s názvom obsahujúcim "faktura", "invoice", "doklad" = VŽDY relevant
 - Screenshot, logo, podpis, banner = NERELEVANTNÉ
-- Newsletter s prílohami = zvyčajne nerelevantné (ak predmet nenaznačuje faktúru)
-- Ak je email preposlanie faktúry = relevant, content_types=["forwarded"]
+
+NERELEVANTNÉ (is_accounting=false):
+- Marketingové emaily, newslettre, promo akcie, výpredaje, zľavy
+- E-shopy s produktovými obrázkami (kozmetika, oblečenie, jedlo, elektronika)
+- Sociálne siete (Instagram, Facebook, TikTok notifikácie)
+- Reklama, propagácia, nové kolekcie, doprava zadarmo
+- Emaily s prílohou ktorá je len reklamný obrázok alebo banner
+- Emaily typu "Pozrite si naše nové produkty" alebo "Nakúpte teraz"
+- Potvrdenia o sledovaní (tracking), notifikácie o doručení bez sumy
+- Ak predmet emailu naznačuje marketing/newsletter = VŽDY is_accounting=false, aj keď má prílohy
+
+Ak je email preposlanie faktúry = relevant, content_types=["forwarded"]
 
 Vráť VÝLUČNE JSON pole s ${emails.length} objektami:
 [{"is_accounting": true/false, "confidence": 85, "content_types": ["attachment"], "reasoning": "..."}]`;
@@ -226,11 +247,17 @@ async function extractAttachments(
       || ct.includes("wordprocessing") || ct.includes("msword");
     if (!isRelevantType) continue;
 
-    // Skip generic inline images (logos, signatures)
+    // Skip generic inline images (logos, signatures, marketing banners)
     const lf = filename.toLowerCase();
     if (ct.startsWith("image/") && att.content_disposition === "inline") {
-      if (/^(image\d*|logo|banner|signature|icon|spacer)\.(png|jpg|gif)$/i.test(lf)) continue;
-      if (att.size && att.size < 15000) continue; // <15KB inline image = probably logo
+      if (/^(image\d*|logo|banner|signature|icon|spacer|header|footer|promo|product)\.(png|jpg|gif|jpeg|webp)$/i.test(lf)) continue;
+      if (att.size && att.size < 50000) continue; // <50KB inline image = probably marketing/logo
+    }
+    // Skip image-only attachments that look like marketing
+    if (ct.startsWith("image/") && att.content_disposition !== "inline") {
+      if (att.size && att.size < 10000) continue; // tiny images
+      // Generic "image.png" names are usually marketing
+      if (/^image\d*\.(png|jpg|jpeg|gif|webp)$/i.test(lf)) continue;
     }
 
     // Dedup check
@@ -716,7 +743,7 @@ serve(async (req) => {
           processing_status: triage.is_accounting ? "triaged" : "skipped",
         }, { onConflict: "nylas_message_id" });
 
-        if (triage.is_accounting && triage.confidence >= 30) {
+        if (triage.is_accounting && triage.confidence >= 65) {
           toProcess.push({ msg: batch[j].msg, triage });
         }
       }
