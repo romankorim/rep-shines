@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS idx_documents_client_source_email_id ON public.documents (client_id, source_email_id);
