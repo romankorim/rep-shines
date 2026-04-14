@@ -247,11 +247,17 @@ async function extractAttachments(
       || ct.includes("wordprocessing") || ct.includes("msword");
     if (!isRelevantType) continue;
 
-    // Skip generic inline images (logos, signatures)
+    // Skip generic inline images (logos, signatures, marketing banners)
     const lf = filename.toLowerCase();
     if (ct.startsWith("image/") && att.content_disposition === "inline") {
-      if (/^(image\d*|logo|banner|signature|icon|spacer)\.(png|jpg|gif)$/i.test(lf)) continue;
-      if (att.size && att.size < 15000) continue; // <15KB inline image = probably logo
+      if (/^(image\d*|logo|banner|signature|icon|spacer|header|footer|promo|product)\.(png|jpg|gif|jpeg|webp)$/i.test(lf)) continue;
+      if (att.size && att.size < 50000) continue; // <50KB inline image = probably marketing/logo
+    }
+    // Skip image-only attachments that look like marketing
+    if (ct.startsWith("image/") && att.content_disposition !== "inline") {
+      if (att.size && att.size < 10000) continue; // tiny images
+      // Generic "image.png" names are usually marketing
+      if (/^image\d*\.(png|jpg|jpeg|gif|webp)$/i.test(lf)) continue;
     }
 
     // Dedup check
