@@ -141,7 +141,7 @@ Preposlané: ${e.is_forwarded ? "áno" : "nie"}`).join("\n");
 ${emailList}
 
 Pre KAŽDÝ email vráť:
-- is_accounting: true ak email obsahuje alebo JE faktúra, účtenka, dobropis, výpis, potvrdenie platby, objednávka, zmluva, alebo iný účtovný/finančný doklad
+- is_accounting: true ak email obsahuje alebo JE faktúra, účtenka, dobropis, výpis, potvrdenie platby alebo iný účtovný/finančný doklad
 - content_types: pole stratégií extrahovania:
   "attachment" = doklad je v prílohe (PDF, obrázok)
   "inline_image" = fotka dokladu vložená priamo v tele emailu
@@ -155,8 +155,18 @@ DÔLEŽITÉ:
 - Emaily od Uber, Bolt, Booking, Apple, Google, AWS, Stripe = VŽDY is_accounting=true, content_types=["body_invoice"]
 - PDF príloha s názvom obsahujúcim "faktura", "invoice", "doklad" = VŽDY relevant
 - Screenshot, logo, podpis, banner = NERELEVANTNÉ
-- Newsletter s prílohami = zvyčajne nerelevantné (ak predmet nenaznačuje faktúru)
-- Ak je email preposlanie faktúry = relevant, content_types=["forwarded"]
+
+NERELEVANTNÉ (is_accounting=false):
+- Marketingové emaily, newslettre, promo akcie, výpredaje, zľavy
+- E-shopy s produktovými obrázkami (kozmetika, oblečenie, jedlo, elektronika)
+- Sociálne siete (Instagram, Facebook, TikTok notifikácie)
+- Reklama, propagácia, nové kolekcie, doprava zadarmo
+- Emaily s prílohou ktorá je len reklamný obrázok alebo banner
+- Emaily typu "Pozrite si naše nové produkty" alebo "Nakúpte teraz"
+- Potvrdenia o sledovaní (tracking), notifikácie o doručení bez sumy
+- Ak predmet emailu naznačuje marketing/newsletter = VŽDY is_accounting=false, aj keď má prílohy
+
+Ak je email preposlanie faktúry = relevant, content_types=["forwarded"]
 
 Vráť VÝLUČNE JSON pole s ${emails.length} objektami:
 [{"is_accounting": true/false, "confidence": 85, "content_types": ["attachment"], "reasoning": "..."}]`;
