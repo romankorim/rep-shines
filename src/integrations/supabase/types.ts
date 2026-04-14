@@ -433,11 +433,13 @@ export type Database = {
           ai_confidence: number | null
           ai_raw_data: Json | null
           client_id: string
+          content_hash_sha256: string | null
           created_at: string
           currency: string | null
           delivery_date: string | null
           document_number: string | null
           document_type: Database["public"]["Enums"]["document_type"] | null
+          download_source_url: string | null
           due_date: string | null
           email_message_id: string | null
           expense_category: string | null
@@ -475,11 +477,13 @@ export type Database = {
           ai_confidence?: number | null
           ai_raw_data?: Json | null
           client_id: string
+          content_hash_sha256?: string | null
           created_at?: string
           currency?: string | null
           delivery_date?: string | null
           document_number?: string | null
           document_type?: Database["public"]["Enums"]["document_type"] | null
+          download_source_url?: string | null
           due_date?: string | null
           email_message_id?: string | null
           expense_category?: string | null
@@ -517,11 +521,13 @@ export type Database = {
           ai_confidence?: number | null
           ai_raw_data?: Json | null
           client_id?: string
+          content_hash_sha256?: string | null
           created_at?: string
           currency?: string | null
           delivery_date?: string | null
           document_number?: string | null
           document_type?: Database["public"]["Enums"]["document_type"] | null
+          download_source_url?: string | null
           due_date?: string | null
           email_message_id?: string | null
           expense_category?: string | null
