@@ -79,8 +79,9 @@ function ClientDetailPage() {
   const queryClient = useQueryClient();
 
   const now = new Date();
-  const [viewYear, setViewYear] = useState(now.getFullYear());
-  const [viewMonth, setViewMonth] = useState(now.getMonth() + 1);
+  const defaultPeriod = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const [viewYear, setViewYear] = useState(defaultPeriod.getFullYear());
+  const [viewMonth, setViewMonth] = useState(defaultPeriod.getMonth() + 1);
 
   // Handle Nylas OAuth callback
   useEffect(() => {
