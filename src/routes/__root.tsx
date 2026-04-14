@@ -2,8 +2,7 @@ import { Outlet, Link, HeadContent, Scripts } from "@tanstack/react-router";
 import { createRootRouteWithContext } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/sonner";
-
-import appCss from "../styles.css?url";
+import "../styles.css";
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -50,7 +49,6 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       { name: "twitter:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/92ce938f-1f35-49f9-874e-70c7b0c869fe" },
     ],
     links: [
-      { rel: "stylesheet", href: appCss },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" },
     ],
