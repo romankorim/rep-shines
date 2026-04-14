@@ -305,7 +305,13 @@ export const triggerEmailScan = createServerFn({ method: "POST" })
     }
 
     const result = await resp.json();
-    return { success: true, processed: result.processed || 0, skipped: result.skipped || 0 };
+    return {
+      success: true,
+      processed: result.documentsCreated ?? result.processed ?? 0,
+      skipped: result.rulesSkipped ?? result.skipped ?? 0,
+      triaged: result.triaged ?? 0,
+      discovered: result.discovered ?? 0,
+    };
   });
 
 export const resetEmailSyncPeriod = createServerFn({ method: "POST" })
