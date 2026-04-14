@@ -191,7 +191,12 @@ function ClientDetailPage() {
     try {
       const result = await triggerEmailScan({ data: { clientId, month: viewMonth, year: viewYear, forceReextract: true } });
       await invalidateDocumentQueries();
-      toast.success(`Sync: ${result.processed} importovaných alebo aktualizovaných, ${result.skipped ?? 0} preskočených`);
+      window.setTimeout(() => {
+        void invalidateDocumentQueries();
+      }, 4000);
+      toast.success(
+        `Sync za ${MONTH_NAMES[viewMonth - 1]} ${viewYear}: nájdených ${result.discovered}, na spracovanie ${result.triaged}, nových dokladov ${result.processed}`
+      );
     } catch (error) {
       toast.error(getErrorMessage(error, "Nepodarilo sa synchronizovať e-maily"));
     } finally {

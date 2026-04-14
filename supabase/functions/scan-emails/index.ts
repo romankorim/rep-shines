@@ -72,6 +72,11 @@ interface SenderRule {
   known_vendor_name: string | null;
 }
 
+interface PeriodSeed {
+  tax_period_month?: number;
+  tax_period_year?: number;
+}
+
 function applyRules(
   fromEmail: string,
   subject: string,
@@ -200,6 +205,7 @@ async function extractAttachments(
   clientId: string, officeId: string,
   supabase: any, supabaseUrl: string, anonKey: string,
   emailMsgId: string,
+  periodSeed: PeriodSeed,
 ): Promise<number> {
   let count = 0;
   if (!msg.attachments?.length) return 0;
@@ -261,11 +267,14 @@ async function extractAttachments(
     const storagePath = `${clientId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
     const { error: uploadErr } = await supabase.storage
       .from("documents").upload(storagePath, fileBytes, { contentType: ct });
-    if (uploadErr) continue;
+    if (uploadErr) {
+      console.error("Attachment upload failed:", uploadErr);
+      continue;
+    }
 
     const { data: urlData } = supabase.storage.from("documents").getPublicUrl(storagePath);
 
-    const { data: doc } = await supabase.from("documents").insert({
+    const { data: doc, error: insertErr } = await supabase.from("documents").insert({
       client_id: clientId, office_id: officeId,
       file_name: filename || `attachment.${ext}`,
       file_size: att.size || fileBytes.length,
@@ -275,8 +284,14 @@ async function extractAttachments(
       status: "processing",
       extraction_strategy: "attachment",
       email_message_id: emailMsgId,
+      ...periodSeed,
       content_hash_sha256: hash,
     }).select().single();
+
+    if (insertErr) {
+      console.error("Attachment insert failed:", insertErr);
+      continue;
+    }
 
     if (doc) {
       fetch(`${supabaseUrl}/functions/v1/extract-document`, {
@@ -295,6 +310,7 @@ async function extractBodyInvoice(
   clientId: string, officeId: string,
   supabase: any, supabaseUrl: string, anonKey: string,
   emailMsgId: string,
+  periodSeed: PeriodSeed,
 ): Promise<number> {
   // Fetch full message body
   const msgResp = await fetch(
@@ -346,7 +362,7 @@ async function extractBodyInvoice(
 
   const { data: urlData } = supabase.storage.from("documents").getPublicUrl(storagePath);
 
-  const { data: doc } = await supabase.from("documents").insert({
+  const { data: doc, error: insertErr } = await supabase.from("documents").insert({
     client_id: clientId, office_id: officeId,
     file_name: fileName,
     file_size: htmlBytes.length,
@@ -356,9 +372,15 @@ async function extractBodyInvoice(
     status: "processing",
     extraction_strategy: "body_invoice",
     email_message_id: emailMsgId,
+    ...periodSeed,
     content_hash_sha256: hash,
     original_email_html: body,
   }).select().single();
+
+  if (insertErr) {
+    console.error("Body invoice insert failed:", insertErr);
+    return 0;
+  }
 
   if (doc) {
     fetch(`${supabaseUrl}/functions/v1/extract-document`, {
@@ -377,6 +399,7 @@ async function extractDownloadLinks(
   supabase: any, supabaseUrl: string, anonKey: string,
   emailMsgId: string,
   senderMap: Map<string, SenderRule>,
+  periodSeed: PeriodSeed,
 ): Promise<number> {
   const fromDomain = (msg.from?.[0]?.email || "").split("@")[1]?.toLowerCase() || "";
   const senderRule = senderMap.get(fromDomain);
@@ -450,11 +473,14 @@ async function extractDownloadLinks(
       const storagePath = `${clientId}/${Date.now()}_link_${Math.random().toString(36).slice(2)}.${ext}`;
       const { error: uploadErr } = await supabase.storage
         .from("documents").upload(storagePath, fileBytes, { contentType: ct });
-      if (uploadErr) continue;
+      if (uploadErr) {
+        console.error("Download-link upload failed:", uploadErr);
+        continue;
+      }
 
       const { data: urlData } = supabase.storage.from("documents").getPublicUrl(storagePath);
 
-      const { data: doc } = await supabase.from("documents").insert({
+      const { data: doc, error: insertErr } = await supabase.from("documents").insert({
         client_id: clientId, office_id: officeId,
         file_name: `downloaded_invoice.${ext}`,
         file_size: fileBytes.length,
@@ -464,9 +490,15 @@ async function extractDownloadLinks(
         status: "processing",
         extraction_strategy: "download_link",
         email_message_id: emailMsgId,
+        ...periodSeed,
         content_hash_sha256: hash,
         download_source_url: link,
       }).select().single();
+
+      if (insertErr) {
+        console.error("Download-link insert failed:", insertErr);
+        continue;
+      }
 
       if (doc) {
         fetch(`${supabaseUrl}/functions/v1/extract-document`, {
@@ -695,6 +727,9 @@ serve(async (req) => {
     // ── STAGE 4: MULTI-STRATEGY EXTRACTION ──
 
     let totalDocs = 0;
+    const periodSeed = month && year
+      ? { tax_period_month: month, tax_period_year: year }
+      : {};
 
     for (const { msg, triage } of toProcess) {
       if (Date.now() - startTime > MAX_WALL_TIME_MS) {
@@ -729,7 +764,7 @@ serve(async (req) => {
       // Strategy A: Attachments
       if (types.has("attachment") || (msg.attachments?.length > 0)) {
         try {
-          const n = await extractAttachments(msg, grantId, nylasApiKey, clientId, officeId, supabase, supabaseUrl, anonKey, emailMsgId);
+          const n = await extractAttachments(msg, grantId, nylasApiKey, clientId, officeId, supabase, supabaseUrl, anonKey, emailMsgId, periodSeed);
           docsFromMsg += n;
         } catch (e) { console.error("Attachment extraction error:", e); }
       }
@@ -737,7 +772,7 @@ serve(async (req) => {
       // Strategy C: Body is invoice (BEFORE inline images — more common)
       if (types.has("body_invoice")) {
         try {
-          const n = await extractBodyInvoice(msg, grantId, nylasApiKey, clientId, officeId, supabase, supabaseUrl, anonKey, emailMsgId);
+          const n = await extractBodyInvoice(msg, grantId, nylasApiKey, clientId, officeId, supabase, supabaseUrl, anonKey, emailMsgId, periodSeed);
           docsFromMsg += n;
         } catch (e) { console.error("Body extraction error:", e); }
       }
@@ -745,7 +780,7 @@ serve(async (req) => {
       // Strategy D: Download links
       if (types.has("download_link")) {
         try {
-          const n = await extractDownloadLinks(msg, grantId, nylasApiKey, clientId, officeId, supabase, supabaseUrl, anonKey, emailMsgId, senderMap);
+          const n = await extractDownloadLinks(msg, grantId, nylasApiKey, clientId, officeId, supabase, supabaseUrl, anonKey, emailMsgId, senderMap, periodSeed);
           docsFromMsg += n;
         } catch (e) { console.error("Link extraction error:", e); }
       }
