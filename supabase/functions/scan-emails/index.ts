@@ -94,12 +94,23 @@ function applyRules(
   if (rule) {
     if (rule.force_exclude) return "skip";
     if (rule.force_include || rule.classification === "trusted_invoicer") return "trusted";
-    if (rule.classification === "newsletter" || rule.classification === "spam") return "skip";
+    if (rule.classification === "newsletter" || rule.classification === "spam" || rule.classification === "marketing") return "skip";
   }
 
   // Heuristic: skip obvious non-accounting
   const subjectLower = subject.toLowerCase();
   if (subjectLower.includes("unsubscribe") || subjectLower.includes("odhlásiť")) return "skip";
+
+  // Skip marketing / promo / social media keywords
+  const marketingKeywords = [
+    "sleva", "zľava", "akcia", "výpredaj", "sale", "promo", "newsletter",
+    "novinky", "nové produkty", "new collection", "doprava zdarma", "free shipping",
+    "instagram", "facebook", "tiktok", "sdílet", "zdieľať", "líbí se", "páči sa",
+    "košík", "nákupný", "objednávka potvrdena", "order confirmed",
+    "nelze sdílet", "nelze sdilet", "nelze sdílet",
+    "pink blush", "beauty", "parfém", "parfum", "kosmetik",
+  ];
+  if (marketingKeywords.some(kw => subjectLower.includes(kw))) return "skip";
 
   return "process";
 }
