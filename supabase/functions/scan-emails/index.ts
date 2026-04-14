@@ -78,9 +78,10 @@ function applyRules(
   senderMap: Map<string, SenderRule>,
   processedIds: Set<string>,
   nylasMessageId: string,
+  forceReextract = false,
 ): "process" | "skip" | "trusted" {
   // Already processed?
-  if (processedIds.has(nylasMessageId)) return "skip";
+  if (!forceReextract && processedIds.has(nylasMessageId)) return "skip";
 
   const domain = fromEmail.split("@")[1]?.toLowerCase() || "";
   const rule = senderMap.get(domain) || senderMap.get(fromEmail.toLowerCase());
@@ -489,7 +490,7 @@ serve(async (req) => {
   const startTime = Date.now();
 
   try {
-    const { grantId, clientId, officeId, month, year } = await req.json();
+    const { grantId, clientId, officeId, month, year, forceReextract } = await req.json();
     if (!grantId || !clientId || !officeId) {
       return new Response(JSON.stringify({ error: "Missing required fields" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -596,7 +597,13 @@ serve(async (req) => {
       .eq("client_id", clientId)
       .in("processing_status", ["done", "skipped"]);
 
-    const processedIds = new Set((processed || []).map((p: any) => p.nylas_message_id));
+    const processedIds = forceReextract
+      ? new Set<string>()
+      : new Set((processed || []).map((p: any) => p.nylas_message_id));
+
+    if (forceReextract) {
+      console.log(`[Agent] Force reextract enabled for ${month || "all"}/${year || "all"}`);
+    }
 
     // Apply rules
     const candidates: Array<{ msg: any; ruleResult: string }> = [];
@@ -605,7 +612,7 @@ serve(async (req) => {
     for (const msg of messages) {
       const fromEmail = msg.from?.[0]?.email || "";
       const subject = msg.subject || "";
-      const result = applyRules(fromEmail, subject, senderMap, processedIds, msg.id);
+      const result = applyRules(fromEmail, subject, senderMap, processedIds, msg.id, forceReextract);
 
       if (result === "skip") {
         rulesSkipped++;
