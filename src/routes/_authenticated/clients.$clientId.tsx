@@ -79,9 +79,10 @@ function ClientDetailPage() {
   const queryClient = useQueryClient();
 
   const now = new Date();
-  const defaultPeriod = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const defaultPeriod = new Date(now.getFullYear(), now.getMonth(), 1);
   const [viewYear, setViewYear] = useState(defaultPeriod.getFullYear());
   const [viewMonth, setViewMonth] = useState(defaultPeriod.getMonth() + 1);
+  const [hasInitializedPeriodFromDocuments, setHasInitializedPeriodFromDocuments] = useState(false);
 
   // Handle Nylas OAuth callback
   useEffect(() => {
@@ -130,6 +131,10 @@ function ClientDetailPage() {
     return { month: d.getMonth() + 1, year: d.getFullYear() };
   };
 
+  const latestDocumentPeriod = documents.length > 0 ? getDocPeriod(documents[0]) : null;
+  const latestDocumentMonth = latestDocumentPeriod?.month ?? null;
+  const latestDocumentYear = latestDocumentPeriod?.year ?? null;
+
   const currentPeriodDocs = documents.filter((doc: any) => {
     const p = getDocPeriod(doc);
     return p.month === viewMonth && p.year === viewYear;
@@ -144,6 +149,21 @@ function ClientDetailPage() {
   useEffect(() => {
     setSelectedDocumentIds([]);
   }, [viewMonth, viewYear]);
+
+  useEffect(() => {
+    setHasInitializedPeriodFromDocuments(false);
+  }, [clientId]);
+
+  useEffect(() => {
+    if (hasInitializedPeriodFromDocuments || !data) return;
+
+    if (latestDocumentMonth && latestDocumentYear) {
+      setViewMonth(latestDocumentMonth);
+      setViewYear(latestDocumentYear);
+    }
+
+    setHasInitializedPeriodFromDocuments(true);
+  }, [clientId, data, hasInitializedPeriodFromDocuments, latestDocumentMonth, latestDocumentYear]);
 
   // Remove invalid selections when documents change
   useEffect(() => {
@@ -194,6 +214,24 @@ function ClientDetailPage() {
       window.setTimeout(() => {
         void invalidateDocumentQueries();
       }, 4000);
+
+      const shouldJumpToLatestPeriod =
+        result.processed === 0 &&
+        result.triaged > 0 &&
+        currentPeriodDocs.length === 0 &&
+        latestDocumentMonth &&
+        latestDocumentYear &&
+        (latestDocumentMonth !== viewMonth || latestDocumentYear !== viewYear);
+
+      if (shouldJumpToLatestPeriod) {
+        setViewMonth(latestDocumentMonth);
+        setViewYear(latestDocumentYear);
+        toast.success(
+          `Sync za ${MONTH_NAMES[viewMonth - 1]} ${viewYear}: nájdených ${result.discovered}, na spracovanie ${result.triaged}, nových dokladov ${result.processed}. Doklady už máte v ${MONTH_NAMES[latestDocumentMonth - 1]} ${latestDocumentYear}.`
+        );
+        return;
+      }
+
       toast.success(
         `Sync za ${MONTH_NAMES[viewMonth - 1]} ${viewYear}: nájdených ${result.discovered}, na spracovanie ${result.triaged}, nových dokladov ${result.processed}`
       );
@@ -202,7 +240,7 @@ function ClientDetailPage() {
     } finally {
       setScanning(false);
     }
-  }, [clientId, invalidateDocumentQueries, viewMonth, viewYear]);
+  }, [clientId, currentPeriodDocs.length, invalidateDocumentQueries, latestDocumentMonth, latestDocumentYear, viewMonth, viewYear]);
 
   const handleDeleteDocuments = useCallback(async () => {
     const targetDocIds = selectedCurrentPeriodIds.length > 0 ? selectedCurrentPeriodIds : currentPeriodDocIds;
