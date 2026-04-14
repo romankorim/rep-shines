@@ -737,7 +737,7 @@ serve(async (req) => {
           processing_status: triage.is_accounting ? "triaged" : "skipped",
         }, { onConflict: "nylas_message_id" });
 
-        if (triage.is_accounting && triage.confidence >= 30) {
+        if (triage.is_accounting && triage.confidence >= 65) {
           toProcess.push({ msg: batch[j].msg, triage });
         }
       }
